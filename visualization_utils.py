@@ -1,0 +1,164 @@
+"""
+Visualization utilities for pose tracking.
+"""
+import copy
+import numpy as np
+import cv2
+import open3d as o3d
+
+
+def draw_pose_axes(image, pose, intrinsic, length=0.1):
+    """
+    Draw 3D coordinate axes on image using pose and camera intrinsics.
+    
+    Args:
+        image: numpy array (H, W, 3) - RGB image
+        pose: numpy array (4, 4) - transformation matrix
+        intrinsic: numpy array (3, 3) - camera intrinsic matrix
+        length: float - length of axes in meters
+    
+    Returns:
+        numpy array - image with axes drawn
+    """
+    # Define axis endpoints in object frame
+    axis_points = np.array([
+        [0, 0, 0],           # origin
+        [length, 0, 0],      # X axis (red)
+        [0, length, 0],     # Y axis (green)
+        [0, 0, length]      # Z axis (blue)
+    ])
+    
+    # Transform to camera frame
+    axis_points_cam = (pose[:3, :3] @ axis_points.T).T + pose[:3, 3]
+    
+    # Project to image
+    fx, fy = intrinsic[0, 0], intrinsic[1, 1]
+    cx, cy = intrinsic[0, 2], intrinsic[1, 2]
+    
+    points_2d = []
+    for point in axis_points_cam:
+        if point[2] > 0:  # Only project points in front of camera
+            x = int(fx * point[0] / point[2] + cx)
+            y = int(fy * point[1] / point[2] + cy)
+            points_2d.append((x, y))
+        else:
+            points_2d.append(None)
+    
+    # Draw axes
+    if points_2d[0] is not None:
+        origin = points_2d[0]
+        
+        # X axis (red)
+        if points_2d[1] is not None:
+            cv2.line(image, origin, points_2d[1], (0, 0, 255), 3)
+            cv2.circle(image, points_2d[1], 5, (0, 0, 255), -1)
+        
+        # Y axis (green)
+        if points_2d[2] is not None:
+            cv2.line(image, origin, points_2d[2], (0, 255, 0), 3)
+            cv2.circle(image, points_2d[2], 5, (0, 255, 0), -1)
+        
+        # Z axis (blue)
+        if points_2d[3] is not None:
+            cv2.line(image, origin, points_2d[3], (255, 0, 0), 3)
+            cv2.circle(image, points_2d[3], 5, (255, 0, 0), -1)
+    
+    return image
+
+
+def project_mesh_to_image(image, mesh, pose, intrinsic):
+    """
+    Project mesh vertices to image and draw wireframe.
+    
+    Args:
+        image: numpy array (H, W, 3) - RGB image
+        mesh: open3d.geometry.TriangleMesh - mesh to project
+        pose: numpy array (4, 4) - transformation matrix
+        intrinsic: numpy array (3, 3) - camera intrinsic matrix
+    
+    Returns:
+        numpy array - image with projected mesh
+    """
+    # Get mesh vertices
+    vertices = np.asarray(mesh.vertices)
+    
+    # Transform to camera frame
+    vertices_cam = (pose[:3, :3] @ vertices.T).T + pose[:3, 3]
+    
+    # Project to image
+    fx, fy = intrinsic[0, 0], intrinsic[1, 1]
+    cx, cy = intrinsic[0, 2], intrinsic[1, 2]
+    
+    vertices_2d = []
+    for point in vertices_cam:
+        if point[2] > 0:  # Only project points in front of camera
+            x = int(fx * point[0] / point[2] + cx)
+            y = int(fy * point[1] / point[2] + cy)
+            vertices_2d.append((x, y))
+        else:
+            vertices_2d.append(None)
+    
+    # Draw wireframe
+    triangles = np.asarray(mesh.triangles)
+    for triangle in triangles:
+        pts = [vertices_2d[i] for i in triangle]
+        if all(p is not None for p in pts):
+            # Check if all points are within image bounds
+            h, w = image.shape[:2]
+            if all(0 <= p[0] < w and 0 <= p[1] < h for p in pts):
+                cv2.line(image, pts[0], pts[1], (255, 255, 0), 1)
+                cv2.line(image, pts[1], pts[2], (255, 255, 0), 1)
+                cv2.line(image, pts[2], pts[0], (255, 255, 0), 1)
+    
+    return image
+
+
+def overlay_mask(image, mask, color=(0, 255, 0), alpha=0.3):
+    """
+    Overlay mask on image.
+    
+    Args:
+        image: numpy array (H, W, 3) - RGB image
+        mask: numpy array (H, W) - boolean mask
+        color: tuple - RGB color for mask
+        alpha: float - transparency
+    
+    Returns:
+        numpy array - image with mask overlay
+    """
+    overlay = image.copy()
+    mask_colored = np.zeros_like(image)
+    mask_colored[mask] = color
+    cv2.addWeighted(overlay, 1 - alpha, mask_colored, alpha, 0, overlay)
+    return overlay
+
+
+
+
+def visualize_icp_alignment(scene_pcd, cad_pcd, transformation):
+    """
+    Visualize how well the scene point cloud aligns with the CAD reference
+    after performing ICP.
+    """
+    # Copy original clouds
+    scene_aligned = copy.deepcopy(scene_pcd)
+    cad_vis = copy.deepcopy(cad_pcd)
+
+    # Apply ICP transform to scene cloud
+    scene_aligned.transform(transformation)
+
+    # Color clouds for display
+    scene_aligned.paint_uniform_color([1.0, 0.706, 0.0])  # yellow
+    cad_vis.paint_uniform_color([0.0, 0.651, 0.929])      # blue
+
+    # Visualize
+    # print("ICP fitness:", result.fitness)
+    # print("ICP RMSE:", result.inlier_rmse)
+    print("Transformation:\n", transformation)
+
+    o3d.visualization.draw_geometries(
+        [scene_aligned, cad_vis],
+        window_name="ICP Alignment Result",
+        width=1600,
+        height=900
+    )
