@@ -135,30 +135,72 @@ def overlay_mask(image, mask, color=(0, 255, 0), alpha=0.3):
 
 
 
-def visualize_icp_alignment(scene_pcd, cad_pcd, transformation):
+def visualize_icp_alignment(scene_pcd, cad_pcd, transformation=None, show_in_camera_frame=True):
     """
-    Visualize how well the scene point cloud aligns with the CAD reference
-    after performing ICP.
+    Visualize how well the scene point cloud aligns with the CAD reference.
+    
+    Args:
+        scene_pcd: open3d.geometry.PointCloud - scene point cloud (in camera coordinates)
+        cad_pcd: open3d.geometry.PointCloud - CAD model point cloud (in CAD model coordinates)
+        transformation: numpy array (4, 4) - transformation matrix
+                       If show_in_camera_frame=True: T_cad_to_camera (transforms CAD to camera coords)
+                       If show_in_camera_frame=False: T_camera_to_cad (transforms scene to CAD coords)
+        show_in_camera_frame: bool - if True, show both in camera coordinates; if False, show both in CAD coordinates
     """
-    # Copy original clouds
-    scene_aligned = copy.deepcopy(scene_pcd)
+    # Copy original clouds to avoid modifying them
+    scene_vis = copy.deepcopy(scene_pcd)
     cad_vis = copy.deepcopy(cad_pcd)
 
-    # Apply ICP transform to scene cloud
-    scene_aligned.transform(transformation)
+    if transformation is not None:
+        print("\n--- Point Cloud Visualization ---")
+        print(f"Scene PCD (camera coords): center={scene_vis.get_center()}, {len(scene_vis.points)} points")
+        print(f"CAD PCD (CAD coords): center={cad_vis.get_center()}, {len(cad_vis.points)} points")
+        
+        if show_in_camera_frame:
+            # Transform CAD to camera coordinates for visualization
+            # transformation is T_cad_to_camera
+            cad_vis.transform(transformation)
+            print(f"CAD PCD (transformed to camera coords): center={cad_vis.get_center()}")
+            print(f"Distance between scene and CAD centers (in camera frame): {np.linalg.norm(scene_vis.get_center() - cad_vis.get_center()):.4f} m")
+            print(f"Transformation T_cad_to_camera:\n{transformation}")
+        else:
+            # Transform scene to CAD coordinates for visualization
+            # transformation is T_camera_to_cad
+            scene_vis.transform(transformation)
+            print(f"Scene PCD (transformed to CAD coords): center={scene_vis.get_center()}")
+            print(f"Distance between scene and CAD centers (in CAD frame): {np.linalg.norm(scene_vis.get_center() - cad_vis.get_center()):.4f} m")
+            print(f"Transformation T_camera_to_cad:\n{transformation}")
 
     # Color clouds for display
-    scene_aligned.paint_uniform_color([1.0, 0.706, 0.0])  # yellow
-    cad_vis.paint_uniform_color([0.0, 0.651, 0.929])      # blue
+    scene_vis.paint_uniform_color([1.0, 0.706, 0.0])  # orange/yellow for scene
+    cad_vis.paint_uniform_color([0.0, 0.651, 0.929])  # blue for CAD
 
-    # Visualize
-    # print("ICP fitness:", result.fitness)
-    # print("ICP RMSE:", result.inlier_rmse)
-    print("Transformation:\n", transformation)
+    # Create coordinate frames at origins for reference
+    scene_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05, origin=scene_vis.get_center())
+    cad_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05, origin=cad_vis.get_center())
+    
+    # Color the frames
+    scene_frame.paint_uniform_color([1.0, 0.706, 0.0])  # Match scene color
+    cad_frame.paint_uniform_color([0.0, 0.651, 0.929])  # Match CAD color
 
+    # Create camera coordinate frame at origin
+    camera_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+    camera_frame.paint_uniform_color([1.0, 0.0, 0.0])  # Red for camera frame
+
+    print("\nOpening visualization window...")
+    if show_in_camera_frame:
+        print("Yellow/Orange = Scene point cloud (camera coordinates)")
+        print("Blue = CAD model point cloud (transformed to camera coordinates)")
+        print("Red = Camera coordinate frame (origin)")
+    else:
+        print("Yellow/Orange = Scene point cloud (transformed to CAD coordinates)")
+        print("Blue = CAD model point cloud (CAD coordinates)")
+    
     o3d.visualization.draw_geometries(
-        [scene_aligned, cad_vis],
-        window_name="ICP Alignment Result",
+        [scene_vis, cad_vis, scene_frame, cad_frame, camera_frame],
+        window_name="ICP Alignment - Scene (yellow) vs CAD (blue)",
         width=1600,
-        height=900
+        height=900,
+        point_show_normal=False
     )
+

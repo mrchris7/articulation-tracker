@@ -17,7 +17,7 @@ from cam_utils import ZEDStreamer
 
 from point_cloud_utils import depth_to_point_cloud, preprocess_point_cloud
 from icp_pose_estimator import ICPPoseEstimator
-from visualization_utils import draw_pose_axes, project_mesh_to_image, overlay_mask
+from visualization_utils import draw_pose_axes, overlay_mask
 from recorded_streamer import RecordedZEDStreamer
 
 
@@ -85,19 +85,18 @@ class PoseTracker:
         )
         self.sam2_initialized = False
         
-        # Initialize ICP pose estimator
-        print(f"Loading CAD model from {args.cad_model}...")
+        # Initialize ICP pose tracker (frame-to-frame tracking, no CAD model)
+        print("Initializing ICP pose tracker...")
         self.icp_estimator = ICPPoseEstimator(
-            cad_model_path=args.cad_model,
             voxel_size=args.voxel_size,
             max_correspondence_distance=args.max_correspondence_distance
         )
         
         # Tracking state
-        self.current_pose = None
         self.frame_count = 0
         self.bbox = None
         self.tracking_active = False
+        self.initialized = False
         
         # Mouse callback data for bounding box drawing
         self.mouse_data = {
@@ -237,19 +236,14 @@ class PoseTracker:
         
         print(f"Object point cloud: {len(object_pcd.points)} points")
         
-        # Estimate initial pose using ICP
-        print("Estimating initial pose...")
-        initial_pose, fitness, rmse = self.icp_estimator.estimate_pose(object_pcd)
+        # Initialize ICP tracker with first frame's point cloud
+        print("Initializing ICP tracker with first frame...")
+        self.icp_estimator.initialize(object_pcd)
         
-        print(f"Initial pose estimated:")
-        print(f"  Fitness: {fitness:.4f}")
-        print(f"  RMSE: {rmse:.4f}")
-        print(f"  Translation: {initial_pose[:3, 3]}")
-        
-        # Store initial pose
-        self.current_pose = initial_pose
+        # First frame: identity pose (translation [0, 0, 0])
         self.tracking_active = True
         self.sam2_initialized = True
+        self.initialized = True
         
         return True
 
@@ -300,28 +294,19 @@ class PoseTracker:
             self.camera_intrinsic,
             mask=mask
         )
-
-
-        # Temp visualization
-        object_pcd.paint_uniform_color([1, 0.706, 0])   # yellow-ish
-        #self.icp_estimator.cad_pcd.paint_uniform_color([0, 0.651, 0.929]) # blue-ish
-        o3d.visualization.draw_geometries([object_pcd, self.icp_estimator.cad_pcd])
-
         
         if len(object_pcd.points) == 0:
             # Return previous pose if no points
-            return mask, self.current_pose, 0.0, float('inf')
+            if self.initialized:
+                pose_in_ref_frame = self.icp_estimator.pose_in_reference_frame
+            else:
+                pose_in_ref_frame = None
+            return mask, pose_in_ref_frame, 0.0, float('inf')
         
-        # Estimate pose using ICP with previous pose as initial guess
-        pose, fitness, rmse = self.icp_estimator.estimate_pose(
-            object_pcd,
-            previous_pose=self.current_pose
-        )
+        # Track frame: ICP between previous and current point clouds
+        pose_in_ref_frame, fitness, rmse = self.icp_estimator.track_frame(object_pcd)
         
-        # Update current pose
-        self.current_pose = pose
-        
-        return mask, pose, fitness, rmse
+        return mask, pose_in_ref_frame, fitness, rmse
     
     def run(self):
         """Main tracking loop."""
@@ -329,8 +314,6 @@ class PoseTracker:
         
         # Get first frame for initialization
         rgb_frame, depth_frame = self._get_next_frame()
-        print("rgb_frame: ", rgb_frame)
-        print("depth_frame: ", depth_frame)
         if rgb_frame is None:
             print("Error: Could not get frame from camera")
             return
@@ -361,25 +344,24 @@ class PoseTracker:
             # Overlay mask
             vis_frame = overlay_mask(vis_frame, mask, color=(0, 255, 0), alpha=0.3)
             
-            # Draw pose axes
+            # Draw pose frame at handle center
             if pose is not None:
-                print("pose found: ", pose)
-
-                vis_frame = draw_pose_axes(
-                    vis_frame,
-                    pose,
-                    self.camera_intrinsic,
-                    length=0.1
-                )
+                # pose is in reference frame (first frame's camera coordinates)
+                # Since camera is static, reference frame = current camera frame
+                # So we can directly use the pose translation as handle center in camera coordinates
+                handle_center_z = pose[2, 3]
                 
-                # Optionally project mesh
-                if self.args.show_mesh:
-                    vis_frame = project_mesh_to_image(
+                if handle_center_z > 0:  # Only if in front of camera
+                    # Draw pose frame at handle center
+                    # Use the pose directly (it's already in camera coordinates)
+                    vis_frame = draw_pose_axes(
                         vis_frame,
-                        self.icp_estimator.cad_mesh,
                         pose,
-                        self.camera_intrinsic
+                        self.camera_intrinsic,
+                        length=0.05
                     )
+                else:
+                    print(f"WARNING: Handle center behind camera (z={handle_center_z:.3f})")
             else:
                 print("No pose found")
             
@@ -392,8 +374,16 @@ class PoseTracker:
             ]
             
             if pose is not None:
-                t = pose[:3, 3]
-                info_text.append(f"Translation: [{t[0]:.3f}, {t[1]:.3f}, {t[2]:.3f}]")
+                # Pose translation is actual handle position in camera coords
+                # for display, show displacement from first frame
+                t_actual = pose[:3, 3]
+                t_displacement = t_actual - self.icp_estimator.reference_center
+                distance = np.linalg.norm(t_displacement)
+                info_text.append(f"Position: [{t_actual[0]:.3f}, {t_actual[1]:.3f}, {t_actual[2]:.3f}]")
+                info_text.append(f"Displacement: [{t_displacement[0]:.3f}, {t_displacement[1]:.3f}, {t_displacement[2]:.3f}]")
+                info_text.append(f"Distance: {distance:.3f} m")
+            else:
+                info_text.append("Translation: N/A")
             
             y_offset = 20
             for i, text in enumerate(info_text):
@@ -407,7 +397,7 @@ class PoseTracker:
                     2
                 )
             
-            # Calculate FPS
+            # calculate FPS
             fps_counter += 1
             if fps_counter >= 30:
                 fps = 30.0 / (time.time() - fps_start_time)
@@ -443,7 +433,7 @@ def main():
     
     # source selection
     parser.add_argument("--camera_source", choices=["zed", "recorded"], default="zed", help="Select live ZED camera or recorded frames")
-    parser.add_argument("--recorded_root", type=str, default=os.path.join("data", "scene0000_00"), help="Root folder for recorded RGB-D sequence")
+    parser.add_argument("--recorded_root", type=str, default=os.path.join("data", "scene0010_00"), help="Root folder for recorded RGB-D sequence")
     parser.add_argument("--recorded_color_subdir", type=str, default="color", help="Relative path under recorded_root that contains color frames")
     parser.add_argument("--recorded_depth_subdir", type=str, default="depth", help="Relative path under recorded_root that contains depth frames")
     parser.add_argument("--recorded_intrinsic", type=str, default=None, help="Optional explicit path to intrinsic matrix (defaults to recorded_root/intrinsics/intrinsic_color.txt)")
@@ -462,21 +452,15 @@ def main():
     parser.add_argument("--checkpoint", type=str, default="./sam2_video_predictor/checkpoints/sam2_hiera_small.pt", help="Path to SAM2 checkpoint")
     parser.add_argument("--model_cfg", type=str, default="sam2_hiera_s.yaml", help="SAM2 model config file")
     
-    # CAD model
-    parser.add_argument("--cad_model", type=str, default="./data/models/handle.stl", required=True, help="Path to CAD model file (.obj, .ply, .stl)")
-    
     # ICP parameters
     parser.add_argument("--voxel_size", type=float, default=0.01, help="Voxel size for point cloud downsampling (meters)")
     parser.add_argument("--max_correspondence_distance", type=float, default=0.05, help="Max correspondence distance for ICP (meters)")
     
     # visualization
-    parser.add_argument("--show_mesh", action="store_true", help="Show projected mesh wireframe")
+    parser.add_argument("--visualize_point_clouds", action="store_true", help="Show Open3D window with point clouds")
+    parser.add_argument("--visualization_frame_interval", type=int, default=30, help="Show point cloud visualization every N frames")
 
     args = parser.parse_args()
-    
-    if not os.path.exists(args.cad_model):
-        print(f"Error: CAD model file not found: {args.cad_model}")
-        return
     
     if not os.path.exists(args.checkpoint):
         print(f"Error: SAM2 checkpoint not found: {args.checkpoint}")

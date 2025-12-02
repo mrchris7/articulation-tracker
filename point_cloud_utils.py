@@ -237,3 +237,6 @@ def debug_pointclouds(scene_pcd, cad_pcd, result=None):
             print("ICP RMSE is very large → alignment likely failed")
 
     print("==========================================================\n")
+
+
+

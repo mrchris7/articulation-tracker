@@ -89,6 +89,9 @@ class RecordedZEDStreamer:
                 self._intrinsic_original, original_size, (self.width, self.height)
             )
 
+        # Validate depth loading with a sample frame
+        self._validate_depth_loading()
+
         self.started = True
 
     def get_status(self):
@@ -100,13 +103,27 @@ class RecordedZEDStreamer:
 
         color_path = self._color_paths[self.frame_ptr]
         depth_path = self._depth_paths[self.frame_ptr]
+        frame_idx = self.frame_indices[self.frame_ptr]
         self.frame_ptr += 1
 
         color = cv2.imread(color_path, cv2.IMREAD_COLOR)
         depth_raw = cv2.imread(depth_path, cv2.IMREAD_UNCHANGED)
 
-        if color is None or depth_raw is None:
+        if color is None:
+            print(f"WARNING: Failed to read color frame {frame_idx} from {color_path}")
             return None, None
+        
+        if depth_raw is None:
+            print(f"ERROR: Failed to read depth frame {frame_idx} from {depth_path}")
+            return None, None
+
+        # Validate depth_raw properties
+        if depth_raw.size == 0:
+            print(f"ERROR: Depth frame {frame_idx} is empty")
+            return None, None
+        
+        if len(depth_raw.shape) != 2:
+            print(f"WARNING: Depth frame {frame_idx} has unexpected shape {depth_raw.shape}, expected 2D array")
 
         # Convert depth to meters
         depth = depth_raw.astype(np.float32)
@@ -121,6 +138,7 @@ class RecordedZEDStreamer:
 
         # Clamp invalid depths
         mask_invalid = (depth < self.close) | (depth > self.far) | np.isnan(depth)
+        num_invalid = mask_invalid.sum()
         depth[mask_invalid] = 0.0
 
         return color, depth
@@ -169,4 +187,76 @@ class RecordedZEDStreamer:
         scaled[1, 2] *= sy
         return scaled
 
+    
+    def _validate_depth_loading(self):
 
+        if not self._depth_paths:
+            print("WARNING: No depth paths available for validation")
+            return
+
+        sample_depth_path = self._depth_paths[0]
+        print(f"\n=== Validating Depth Loading ===")
+        print(f"Sample depth file: {sample_depth_path}")
+        print(f"Depth scale: {self.depth_scale}")
+        print(f"Expected depth range (after scaling): {self.close} - {self.far} meters")
+
+        # Try to load the sample depth frame
+        depth_raw = cv2.imread(sample_depth_path, cv2.IMREAD_UNCHANGED)
+        
+        if depth_raw is None:
+            raise RuntimeError(f"Cannot read depth frame: {sample_depth_path}")
+        
+        print(f"Depth file read successfully")
+        print(f"Raw depth shape: {depth_raw.shape}")
+        print(f"Raw depth dtype: {depth_raw.dtype}")
+        
+        # Check raw depth value range
+        valid_mask_raw = (depth_raw > 0) & (depth_raw < np.iinfo(depth_raw.dtype).max)
+        if valid_mask_raw.any():
+            raw_min = depth_raw[valid_mask_raw].min()
+            raw_max = depth_raw[valid_mask_raw].max()
+            raw_mean = depth_raw[valid_mask_raw].mean()
+            print(f"Raw depth range (valid pixels): {raw_min} - {raw_max} (mean: {raw_mean:.1f})")
+        else:
+            print(f"WARNING: No valid depth pixels found in sample frame!")
+        
+        # Convert to meters and check
+        depth_meters = depth_raw.astype(np.float32)
+        if self.depth_scale and self.depth_scale != 0:
+            depth_meters /= self.depth_scale
+        
+        print(f"  Scaled depth dtype: {depth_meters.dtype}")
+        
+        # Check scaled depth value range
+        valid_mask = (depth_meters > 0) & (depth_meters < np.inf) & ~np.isnan(depth_meters)
+        num_valid = valid_mask.sum()
+        num_total = depth_meters.size
+        valid_percentage = 100.0 * num_valid / num_total if num_total > 0 else 0.0
+        
+        print(f"  Valid depth pixels: {num_valid}/{num_total} ({valid_percentage:.1f}%)")
+        
+        if valid_mask.any():
+            meters_min = depth_meters[valid_mask].min()
+            meters_max = depth_meters[valid_mask].max()
+            meters_mean = depth_meters[valid_mask].mean()
+            print(f"  Scaled depth range (valid pixels): {meters_min:.3f} - {meters_max:.3f} m (mean: {meters_mean:.3f} m)")
+            
+            # Check if values are in expected range
+            in_range_mask = (depth_meters >= self.close) & (depth_meters <= self.far)
+            num_in_range = in_range_mask.sum()
+            in_range_percentage = 100.0 * num_in_range / num_total if num_total > 0 else 0.0
+            print(f"  Pixels in range [{self.close}, {self.far}] m: {num_in_range}/{num_total} ({in_range_percentage:.1f}%)")
+            
+            if meters_max > self.far * 2:
+                print(f"  WARNING: Maximum depth ({meters_max:.3f} m) is much larger than far threshold ({self.far} m)")
+                print(f"           Consider adjusting --depth_max or --recorded_depth_scale")
+            
+            if meters_min < self.close / 2 and meters_min > 0:
+                print(f"  WARNING: Minimum depth ({meters_min:.3f} m) is much smaller than close threshold ({self.close} m)")
+                print(f"           Consider adjusting --depth_min")
+        else:
+            print(f"  ERROR: No valid depth pixels after scaling!")
+            print(f"         Check depth_scale ({self.depth_scale}) - it might be incorrect")
+            raise RuntimeError("Depth validation failed: no valid pixels after scaling")
+        
+        print(f"=== Depth Validation Complete ===\n")
