@@ -135,6 +135,79 @@ def overlay_mask(image, mask, color=(0, 255, 0), alpha=0.3):
 
 
 
+def visualize_frame_to_frame_icp(previous_pcd, current_pcd, reference_pcd=None, transformation=None, fitness=0.0, rmse=0.0):
+    """
+    Visualize frame-to-frame ICP alignment between previous and current point clouds.
+    
+    Args:
+        previous_pcd: open3d.geometry.PointCloud - previous frame's point cloud (in camera coordinates)
+        current_pcd: open3d.geometry.PointCloud - current frame's point cloud (in camera coordinates)
+        reference_pcd: open3d.geometry.PointCloud - first frame's reference point cloud (in camera coordinates)
+        transformation: numpy array (4, 4) - T_prev_to_curr transformation from ICP
+        fitness: float - ICP fitness score
+        rmse: float - ICP inlier RMSE
+    """
+    # Copy original clouds to avoid modifying them
+    prev_vis = copy.deepcopy(previous_pcd)
+    curr_vis = copy.deepcopy(current_pcd)
+    ref_vis = copy.deepcopy(reference_pcd) if reference_pcd is not None else None
+    
+    print("\n--- Frame-to-Frame ICP Visualization ---")
+    print(f"Previous PCD: center={prev_vis.get_center()}, {len(prev_vis.points)} points")
+    print(f"Current PCD: center={curr_vis.get_center()}, {len(curr_vis.points)} points")
+    if ref_vis is not None:
+        print(f"Reference PCD (first frame): center={ref_vis.get_center()}, {len(ref_vis.points)} points")
+    
+    if transformation is not None:
+        # Transform previous frame to current frame coordinates for visualization
+        prev_vis.transform(transformation)
+        print(f"Previous PCD (transformed to current frame): center={prev_vis.get_center()}")
+        print(f"Distance between centers (after transform): {np.linalg.norm(prev_vis.get_center() - curr_vis.get_center()):.4f} m")
+        print(f"ICP Fitness: {fitness:.4f}, RMSE: {rmse:.6f} m")
+        print(f"Transformation T_prev_to_curr:\n{transformation}")
+    
+    # Color clouds for display
+    prev_vis.paint_uniform_color([1.0, 0.706, 0.0])  # orange/yellow for previous frame
+    curr_vis.paint_uniform_color([0.0, 0.651, 0.929])  # blue for current frame
+    if ref_vis is not None:
+        ref_vis.paint_uniform_color([0.0, 1.0, 0.0])  # green for reference (first frame)
+    
+    # Create coordinate frames at centers
+    prev_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05, origin=prev_vis.get_center())
+    curr_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05, origin=curr_vis.get_center())
+    
+    # Color the frames
+    prev_frame.paint_uniform_color([1.0, 0.706, 0.0])  # Match previous color
+    curr_frame.paint_uniform_color([0.0, 0.651, 0.929])  # Match current color
+    
+    # Create reference frame if reference PCD exists
+    geometries = [prev_vis, curr_vis, prev_frame, curr_frame]
+    if ref_vis is not None:
+        ref_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05, origin=ref_vis.get_center())
+        ref_frame.paint_uniform_color([0.0, 1.0, 0.0])  # Match reference color
+        geometries.append(ref_vis)
+        geometries.append(ref_frame)
+    
+    # Create camera coordinate frame at origin
+    camera_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0, 0, 0])
+    camera_frame.paint_uniform_color([1.0, 0.0, 0.0])  # Red for camera frame
+    geometries.append(camera_frame)
+    
+    print("Yellow/Orange = Previous frame point cloud (transformed to current frame)")
+    print("Blue = Current frame point cloud")
+    if ref_vis is not None:
+        print("Green = Reference point cloud (first frame)")
+    print("Red = Camera coordinate frame (origin)")
+    
+    o3d.visualization.draw_geometries(
+        geometries,
+        window_name=f"Frame-to-Frame ICP (Fitness: {fitness:.3f}, RMSE: {rmse:.4f}m)",
+        width=1600,
+        height=900,
+        point_show_normal=False
+    )
+
+
 def visualize_icp_alignment(scene_pcd, cad_pcd, transformation=None, show_in_camera_frame=True):
     """
     Visualize how well the scene point cloud aligns with the CAD reference.

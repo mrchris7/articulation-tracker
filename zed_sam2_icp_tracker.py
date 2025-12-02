@@ -17,7 +17,7 @@ from cam_utils import ZEDStreamer
 
 from point_cloud_utils import depth_to_point_cloud, preprocess_point_cloud
 from icp_pose_estimator import ICPPoseEstimator
-from visualization_utils import draw_pose_axes, overlay_mask
+from visualization_utils import draw_pose_axes, overlay_mask, visualize_frame_to_frame_icp
 from recorded_streamer import RecordedZEDStreamer
 
 
@@ -89,7 +89,9 @@ class PoseTracker:
         print("Initializing ICP pose tracker...")
         self.icp_estimator = ICPPoseEstimator(
             voxel_size=args.voxel_size,
-            max_correspondence_distance=args.max_correspondence_distance
+            max_correspondence_distance=args.max_correspondence_distance,
+            visualize_point_clouds=args.visualize_point_clouds,
+            visualization_frame_interval=args.visualization_frame_interval
         )
         
         # Tracking state
@@ -327,8 +329,8 @@ class PoseTracker:
         print("\n=== Tracking Active ===")
         print("Press 'q' to quit")
         
-        fps_counter = 0
         fps_start_time = time.time()
+        visualization_frame_counter = 0
         
         while True:
             rgb_frame, depth_frame = self._get_next_frame()
@@ -337,6 +339,26 @@ class PoseTracker:
             
             # Track object
             mask, pose, fitness, rmse = self.track_frame(rgb_frame, depth_frame)
+            
+            # Point cloud visualization
+            if (self.icp_estimator.visualize_point_clouds and 
+                self.initialized and 
+                self.icp_estimator.current_pcd_processed is not None and
+                self.icp_estimator.previous_pcd is not None and
+                self.icp_estimator.last_transformation is not None):
+                visualization_frame_counter += 1
+                if visualization_frame_counter >= self.icp_estimator.visualization_frame_interval:
+                    visualization_frame_counter = 0
+                    
+                    if hasattr(self.icp_estimator, 'previous_pcd_for_viz'):
+                        visualize_frame_to_frame_icp(
+                            self.icp_estimator.previous_pcd_for_viz,
+                            self.icp_estimator.current_pcd_processed,
+                            reference_pcd=self.icp_estimator.reference_pcd,
+                            transformation=self.icp_estimator.last_transformation,
+                            fitness=self.icp_estimator.last_fitness,
+                            rmse=self.icp_estimator.last_rmse
+                        )
             
             # Visualize
             vis_frame = rgb_frame.copy()
@@ -358,7 +380,7 @@ class PoseTracker:
                         vis_frame,
                         pose,
                         self.camera_intrinsic,
-                        length=0.05
+                        length=0.1
                     )
                 else:
                     print(f"WARNING: Handle center behind camera (z={handle_center_z:.3f})")
@@ -392,26 +414,23 @@ class PoseTracker:
                     text,
                     (10, y_offset + i * 25),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
+                    0.5,
                     (0, 255, 0),
                     2
                 )
             
             # calculate FPS
-            fps_counter += 1
-            if fps_counter >= 30:
-                fps = 30.0 / (time.time() - fps_start_time)
-                fps_start_time = time.time()
-                fps_counter = 0
-                cv2.putText(
-                    vis_frame,
-                    f"FPS: {fps:.1f}",
-                    (10, vis_frame.shape[0] - 20),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 0),
-                    2
-                )
+            fps = 1 / (time.time() - fps_start_time)
+            fps_start_time = time.time()
+            cv2.putText(
+                vis_frame,
+                f"FPS: {fps:.1f}",
+                (10, vis_frame.shape[0] - 20),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 0),
+                2
+            )
             
             cv2.imshow('Pose Tracking', vis_frame)
             

@@ -20,23 +20,35 @@ class ICPPoseEstimator:
     Pose is expressed in the first frame's coordinate system.
     """
     
-    def __init__(self, voxel_size=0.01, max_correspondence_distance=0.05):
+    def __init__(self, voxel_size=0.01, max_correspondence_distance=0.05, 
+                 visualize_point_clouds=False, visualization_frame_interval=30):
         """
         Initialize ICP pose tracker.
         
         Args:
             voxel_size: float - voxel size for point cloud preprocessing
             max_correspondence_distance: float - maximum correspondence distance for ICP
+            visualize_point_clouds: bool - whether to show point cloud visualization
+            visualization_frame_interval: int - show visualization every N frames
         """
         self.voxel_size = voxel_size
         self.max_correspondence_distance = max_correspondence_distance
+        self.visualize_point_clouds = visualize_point_clouds
+        self.visualization_frame_interval = visualization_frame_interval
         
         # Reference point cloud from first frame
         self.reference_pcd = None
         self.previous_pcd = None
+        self.current_pcd_processed = None
+        self.previous_pcd_for_viz = None
         
         # Pose in first frame's coordinate system
         self.pose_in_reference_frame = np.eye(4)  # Identity for first frame
+        
+        # Store last transformation for visualization
+        self.last_transformation = None
+        self.last_fitness = 0.0
+        self.last_rmse = 0.0
     
     def initialize(self, first_frame_pcd):
         """
@@ -171,6 +183,11 @@ class ICPPoseEstimator:
         # T_prev_to_curr transforms previous frame coords to current frame coords
         T_prev_to_curr = result.transformation
         
+        # Store transformation for visualization
+        self.last_transformation = T_prev_to_curr
+        self.last_fitness = result.fitness
+        self.last_rmse = result.inlier_rmse
+        
         # Get handle centers
         current_center = current_pcd_processed.get_center()
         
@@ -193,7 +210,9 @@ class ICPPoseEstimator:
         self.pose_in_reference_frame[:3, :3] = R_ref_to_curr
         self.pose_in_reference_frame[:3, 3] = translation
         
-        # Update previous point cloud for next frame
+        # Store current and previous point clouds 
+        self.current_pcd_processed = current_pcd_processed
+        self.previous_pcd_for_viz = copy.deepcopy(self.previous_pcd)
         self.previous_pcd = current_pcd_processed
         
         return self.pose_in_reference_frame, result.fitness, result.inlier_rmse
@@ -210,3 +229,21 @@ class ICPPoseEstimator:
         
         # Handle center in reference frame is the translation part of the pose
         return self.pose_in_reference_frame[:3, 3]
+    
+    def get_visualization_data(self):
+        """
+        Get data for point cloud visualization.
+        
+        Returns:
+            tuple: (previous_pcd, current_pcd, transformation, fitness, rmse) or None if not available
+        """
+        if not self.visualize_point_clouds or self.last_transformation is None:
+            return None
+        
+        return (
+            self.previous_pcd,
+            None,  # current pcd needs to be provided by caller
+            self.last_transformation,
+            self.last_fitness,
+            self.last_rmse
+        )
