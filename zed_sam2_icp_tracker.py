@@ -19,7 +19,7 @@ from cam_utils import ZEDStreamer
 
 from point_cloud_utils import depth_to_point_cloud, preprocess_point_cloud
 from icp_pose_estimator import ICPPoseEstimator
-from visualization_utils import draw_pose_axes, overlay_mask, visualize_frame_to_frame_icp
+from visualization_utils import draw_pose_axes, overlay_mask, visualize_frame_to_frame_icp, depth_to_colormap
 from recorded_streamer import RecordedZEDStreamer
 
 
@@ -107,6 +107,16 @@ class PoseTracker:
         self.bbox = None
         self.tracking_active = False
         self.initialized = False
+        
+        # Display and saving configuration
+        self.display_mode = args.display_mode
+        self.save_frames = args.save_frames
+        self.output_dir = args.output_dir
+        
+        # Setup output directory if saving frames
+        if self.save_frames:
+            os.makedirs(self.output_dir, exist_ok=True)
+            print(f"Frames will be saved to: {self.output_dir}")
         
         # Mouse callback data for bounding box drawing
         self.mouse_data = {
@@ -375,8 +385,16 @@ class PoseTracker:
                             rmse=self.icp_estimator.last_rmse
                         )
             
-            # Visualize
-            vis_frame = rgb_frame.copy()
+            # Visualize - choose base frame based on display mode
+            if self.display_mode == "depth":
+                # Convert depth to colorized visualization
+                vis_frame = depth_to_colormap(
+                    depth_frame,
+                    depth_min=self.args.depth_min,
+                    depth_max=self.args.depth_max
+                )
+            else:  # default: "color"
+                vis_frame = rgb_frame.copy()
             
             # Overlay mask
             vis_frame = overlay_mask(vis_frame, mask, color=(0, 255, 0), alpha=0.3)
@@ -449,6 +467,10 @@ class PoseTracker:
             
             cv2.imshow('Pose Tracking', vis_frame)
             
+            if self.save_frames:
+                frame_filename = os.path.join(self.output_dir, f"frame_{self.frame_count:06d}.jpg")
+                cv2.imwrite(frame_filename, vis_frame)
+            
             # Check for quit
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
@@ -503,6 +525,9 @@ def main():
     # visualization
     parser.add_argument("--visualize_point_clouds", action="store_true", help="Show Open3D window with point clouds")
     parser.add_argument("--visualization_frame_interval", type=int, default=30, help="Show point cloud visualization every N frames")
+    parser.add_argument("--display_mode", choices=["color", "depth"], default="color", help="Display mode: 'color' for RGB image or 'depth' for depth visualization")
+    parser.add_argument("--save_frames", action="store_true", help="Save visualization frames to output directory")
+    parser.add_argument("--output_dir", type=str, default="./data/output", help="Directory to save frames (default: /data/output)")
 
     args = parser.parse_args()
     

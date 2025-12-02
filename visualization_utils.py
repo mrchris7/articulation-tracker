@@ -133,6 +133,52 @@ def overlay_mask(image, mask, color=(0, 255, 0), alpha=0.3):
     return overlay
 
 
+def depth_to_colormap(depth_frame, depth_min=None, depth_max=None, colormap=cv2.COLORMAP_JET):
+    """
+    Convert depth frame to colorized visualization using colormap.
+    
+    Args:
+        depth_frame: numpy array (H, W) - depth values in meters
+        depth_min: float - minimum depth for normalization (None = auto)
+        depth_max: float - maximum depth for normalization (None = auto)
+        colormap: int - OpenCV colormap (default: COLORMAP_JET)
+    
+    Returns:
+        numpy array (H, W, 3) - colorized depth image
+    """
+    # Create a copy to avoid modifying original
+    depth_vis = depth_frame.copy()
+    
+    # Mask invalid depths
+    valid_mask = (depth_vis > 0) & np.isfinite(depth_vis)
+    
+    if valid_mask.sum() == 0:
+        # No valid depth, return black image
+        return np.zeros((depth_vis.shape[0], depth_vis.shape[1], 3), dtype=np.uint8)
+    
+    # Get valid depth range
+    if depth_min is None:
+        depth_min = depth_vis[valid_mask].min()
+    if depth_max is None:
+        depth_max = depth_vis[valid_mask].max()
+    
+    # Normalize depth to 0-255 range
+    depth_normalized = np.zeros_like(depth_vis, dtype=np.uint8)
+    if depth_max > depth_min:
+        depth_normalized[valid_mask] = np.clip(
+            ((depth_vis[valid_mask] - depth_min) / (depth_max - depth_min) * 255).astype(np.uint8),
+            0, 255
+        )
+    
+    # Apply colormap
+    depth_colored = cv2.applyColorMap(depth_normalized, colormap)
+    
+    # Set invalid pixels to black
+    depth_colored[~valid_mask] = [0, 0, 0]
+    
+    return depth_colored
+
+
 
 
 def visualize_frame_to_frame_icp(previous_pcd, current_pcd, reference_pcd=None, transformation=None, fitness=0.0, rmse=0.0):
