@@ -9,6 +9,8 @@ import torch
 import time
 import open3d as o3d
 
+# run: python articulation-sim/zed_sam2_icp_tracker.py --camera_source recorded --voxel_size 0.001 --visualize_point_clouds --enable_reference_reregistration --enable_rotation_constraints
+
 # parent directory to path to import SAM2 modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'sam2_video_predictor'))
 
@@ -91,7 +93,13 @@ class PoseTracker:
             voxel_size=args.voxel_size,
             max_correspondence_distance=args.max_correspondence_distance,
             visualize_point_clouds=args.visualize_point_clouds,
-            visualization_frame_interval=args.visualization_frame_interval
+            visualization_frame_interval=args.visualization_frame_interval,
+            enable_reference_reregistration=args.enable_reference_reregistration,
+            reference_reregistration_interval=args.reference_reregistration_interval,
+            reference_reregistration_min_fitness=args.reference_reregistration_min_fitness,
+            enable_rotation_constraints=args.enable_rotation_constraints,
+            max_angular_velocity=args.max_angular_velocity,
+            rotation_smoothing_alpha=args.rotation_smoothing_alpha
         )
         
         # Tracking state
@@ -262,13 +270,14 @@ class PoseTracker:
                 self.camera_intrinsic = intrinsic
         return rgb_frame, depth_frame
     
-    def track_frame(self, rgb_frame, depth_frame):
+    def track_frame(self, rgb_frame, depth_frame, dt=None):
         """
         Track object in current frame.
         
         Args:
             rgb_frame: numpy array (H, W, 3) - RGB frame
             depth_frame: numpy array (H, W) - depth frame
+            dt: float - time delta since last frame (seconds)
         
         Returns:
             tuple: (mask, pose, fitness, rmse)
@@ -306,7 +315,7 @@ class PoseTracker:
             return mask, pose_in_ref_frame, 0.0, float('inf')
         
         # Track frame: ICP between previous and current point clouds
-        pose_in_ref_frame, fitness, rmse = self.icp_estimator.track_frame(object_pcd)
+        pose_in_ref_frame, fitness, rmse = self.icp_estimator.track_frame(object_pcd, dt=dt)
         
         return mask, pose_in_ref_frame, fitness, rmse
     
@@ -331,14 +340,20 @@ class PoseTracker:
         
         fps_start_time = time.time()
         visualization_frame_counter = 0
+        last_frame_time = time.time()
         
         while True:
             rgb_frame, depth_frame = self._get_next_frame()
             if rgb_frame is None:
                 break
             
+            # Calculate time delta for rotation validation
+            current_frame_time = time.time()
+            dt = current_frame_time - last_frame_time
+            last_frame_time = current_frame_time
+            
             # Track object
-            mask, pose, fitness, rmse = self.track_frame(rgb_frame, depth_frame)
+            mask, pose, fitness, rmse = self.track_frame(rgb_frame, depth_frame, dt=dt)
             
             # Point cloud visualization
             if (self.icp_estimator.visualize_point_clouds and 
@@ -474,6 +489,16 @@ def main():
     # ICP parameters
     parser.add_argument("--voxel_size", type=float, default=0.01, help="Voxel size for point cloud downsampling (meters)")
     parser.add_argument("--max_correspondence_distance", type=float, default=0.05, help="Max correspondence distance for ICP (meters)")
+    
+    # Reference frame re-registration
+    parser.add_argument("--enable_reference_reregistration", action="store_true", help="Enable periodic re-registration with reference frame to correct drift")
+    parser.add_argument("--reference_reregistration_interval", type=int, default=30, help="Re-register with reference frame every N frames")
+    parser.add_argument("--reference_reregistration_min_fitness", type=float, default=0.3, help="Minimum fitness threshold to trigger re-registration (0.0-1.0)")
+    
+    # Rotation constraint validation
+    parser.add_argument("--enable_rotation_constraints", action="store_true", help="Enable rotation constraint validation and smoothing")
+    parser.add_argument("--max_angular_velocity", type=float, default=2.0, help="Maximum angular velocity in rad/s for rotation validation")
+    parser.add_argument("--rotation_smoothing_alpha", type=float, default=0.7, help="Rotation smoothing factor (0.0-1.0, higher = more smoothing)")
     
     # visualization
     parser.add_argument("--visualize_point_clouds", action="store_true", help="Show Open3D window with point clouds")

@@ -10,6 +10,8 @@ import copy
 import numpy as np
 import open3d as o3d
 from point_cloud_utils import preprocess_point_cloud
+from scipy.spatial.transform import Rotation as scipyR
+from scipy.spatial.transform import Slerp
 
 
 class ICPPoseEstimator:
@@ -21,7 +23,11 @@ class ICPPoseEstimator:
     """
     
     def __init__(self, voxel_size=0.01, max_correspondence_distance=0.05, 
-                 visualize_point_clouds=False, visualization_frame_interval=30):
+                 visualize_point_clouds=False, visualization_frame_interval=30,
+                 enable_reference_reregistration=False, reference_reregistration_interval=30,
+                 reference_reregistration_min_fitness=0.3,
+                 enable_rotation_constraints=False, max_angular_velocity=2.0,
+                 rotation_smoothing_alpha=0.7):
         """
         Initialize ICP pose tracker.
         
@@ -30,11 +36,31 @@ class ICPPoseEstimator:
             max_correspondence_distance: float - maximum correspondence distance for ICP
             visualize_point_clouds: bool - whether to show point cloud visualization
             visualization_frame_interval: int - show visualization every N frames
+            enable_reference_reregistration: bool - enable periodic re-registration with reference frame
+            reference_reregistration_interval: int - re-register with reference every N frames
+            reference_reregistration_min_fitness: float - minimum fitness to trigger re-registration
+            enable_rotation_constraints: bool - enable rotation constraint validation
+            max_angular_velocity: float - maximum angular velocity in rad/s
+            rotation_smoothing_alpha: float - rotation smoothing factor (0.0-1.0, higher = more smoothing)
         """
         self.voxel_size = voxel_size
         self.max_correspondence_distance = max_correspondence_distance
         self.visualize_point_clouds = visualize_point_clouds
         self.visualization_frame_interval = visualization_frame_interval
+        
+        # Reference frame re-registration parameters
+        self.enable_reference_reregistration = enable_reference_reregistration
+        self.reference_reregistration_interval = reference_reregistration_interval
+        self.reference_reregistration_min_fitness = reference_reregistration_min_fitness
+        self.frame_count = 0
+        
+        # Rotation constraint parameters
+        self.enable_rotation_constraints = enable_rotation_constraints
+        self.max_angular_velocity = max_angular_velocity
+        self.rotation_smoothing_alpha = rotation_smoothing_alpha
+        self.previous_rotation = None
+        self.previous_pose = None
+        self.frame_time = 1.0 / 30.0  # Assume 30 fps, will be updated if available
         
         # Reference point cloud from first frame
         self.reference_pcd = None
@@ -75,8 +101,133 @@ class ICPPoseEstimator:
         
         print(f"Initialized tracking: {len(self.reference_pcd.points)} reference points")
         print(f"Reference center: {self.reference_center}")
+        
+        # Initialize rotation smoothing state
+        if self.enable_rotation_constraints:
+            self.previous_rotation = scipyR.from_matrix(np.eye(3))
+            self.previous_pose = np.eye(4)
+            self.previous_pose[:3, 3] = self.reference_center
     
-    def track_frame(self, current_pcd):
+    def _register_with_reference(self, current_pcd_processed):
+        """
+        Register current frame with reference frame to correct drift.
+        
+        Args:
+            current_pcd_processed: open3d.geometry.PointCloud - preprocessed current point cloud
+        
+        Returns:
+            tuple: (transformation (4, 4), fitness, rmse) or None if registration fails
+        """
+        if self.reference_pcd is None or len(current_pcd_processed.points) == 0:
+            return None
+        
+        # Calculate adaptive correspondence distance based on expected displacement
+        ref_center = self.reference_pcd.get_center()
+        curr_center = current_pcd_processed.get_center()
+        center_distance = np.linalg.norm(curr_center - ref_center)
+        
+        adaptive_max_distance = max(
+            self.max_correspondence_distance,
+            center_distance * 1.5,
+            self.max_correspondence_distance * 3.0
+        )
+        adaptive_max_distance = min(adaptive_max_distance, 0.5)
+        
+        # Use current pose as initial guess for reference-to-current transformation
+        # Current pose is T_ref_to_curr, so we can use it directly
+        init_transform = self.pose_in_reference_frame.copy()
+        
+        # Run two-stage ICP for better alignment
+        result_coarse = o3d.pipelines.registration.registration_icp(
+            self.reference_pcd,  # source
+            current_pcd_processed,  # target
+            max_correspondence_distance=adaptive_max_distance,
+            init=init_transform,
+            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+            criteria=o3d.pipelines.registration.ICPConvergenceCriteria(
+                relative_fitness=1e-6,
+                relative_rmse=1e-6,
+                max_iteration=30
+            )
+        )
+        
+        if result_coarse.fitness > 0:
+            # Refine with point-to-plane ICP
+            refine_max_distance = max(
+                self.max_correspondence_distance,
+                result_coarse.inlier_rmse * 3.0
+            )
+            refine_max_distance = min(refine_max_distance, 0.5)
+            
+            result = o3d.pipelines.registration.registration_icp(
+                self.reference_pcd,
+                current_pcd_processed,
+                max_correspondence_distance=refine_max_distance,
+                init=result_coarse.transformation,
+                estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+                criteria=o3d.pipelines.registration.ICPConvergenceCriteria(
+                    relative_fitness=1e-6,
+                    relative_rmse=1e-6,
+                    max_iteration=50
+                )
+            )
+            
+            if result.fitness == 0.0:
+                result = result_coarse
+        else:
+            result = result_coarse
+        
+        if result.fitness > 0:
+            return result.transformation, result.fitness, result.inlier_rmse
+        else:
+            return None
+    
+    def _validate_and_smooth_rotation(self, R_new, dt=None):
+        """
+        Validate rotation against angular velocity constraints and apply smoothing.
+        
+        Args:
+            R_new: numpy array (3, 3) - new rotation matrix
+            dt: float - time delta since last frame (seconds), defaults to self.frame_time
+        
+        Returns:
+            numpy array (3, 3) - validated and smoothed rotation matrix
+        """
+        if dt is None:
+            dt = self.frame_time
+        
+        current_rotation = scipyR.from_matrix(R_new)
+        
+        # Validate angular velocity
+        if self.previous_rotation is not None:
+            # Compute relative rotation
+            R_rel = self.previous_rotation.inv() * current_rotation
+            angle = R_rel.magnitude()
+            angular_velocity = angle / dt if dt > 0 else 0.0
+            
+            if angular_velocity > self.max_angular_velocity:
+                # Rotation too fast, reject and use previous rotation
+                print(f"WARNING: Angular velocity {angular_velocity:.3f} rad/s exceeds max {self.max_angular_velocity:.3f} rad/s. Using previous rotation.")
+                current_rotation = self.previous_rotation
+        
+        # Apply smoothing using SLERP
+        if self.previous_rotation is not None and self.rotation_smoothing_alpha < 1.0:
+            key_times = [0, 1]
+            key_rots = scipyR.from_matrix([
+                self.previous_rotation.as_matrix(),
+                current_rotation.as_matrix()
+            ])
+            slerp = Slerp(key_times, key_rots)
+            # Interpolate at (1 - alpha) to get smoothed rotation
+            smoothed_rotation = slerp([1 - self.rotation_smoothing_alpha])[0]
+            current_rotation = smoothed_rotation
+        
+        # Update previous rotation
+        self.previous_rotation = current_rotation
+        
+        return current_rotation.as_matrix()
+    
+    def track_frame(self, current_pcd, dt=None):
         """
         Track handle pose by comparing current frame with previous frame.
         
@@ -84,10 +235,13 @@ class ICPPoseEstimator:
         
         Args:
             current_pcd: open3d.geometry.PointCloud - current frame's point cloud
+            dt: float - time delta since last frame (seconds), for rotation validation
         
         Returns:
             tuple: (pose_in_reference_frame (4, 4), fitness score, inlier_rmse)
         """
+        if dt is not None:
+            self.frame_time = dt
         if self.previous_pcd is None:
             raise RuntimeError("Tracker not initialized. Call initialize() first.")
         
@@ -201,14 +355,77 @@ class ICPPoseEstimator:
         R_ref_to_prev = self.pose_in_reference_frame[:3, :3]
         R_ref_to_curr = R_ref_to_prev @ R_prev_to_curr
         
+        # Apply rotation constraint validation and smoothing if enabled
+        if self.enable_rotation_constraints:
+            R_ref_to_curr = self._validate_and_smooth_rotation(R_ref_to_curr, dt)
+        
         # For translation: use actual handle center position in camera coordinates
         # This is reference_center + displacement, which equals current_center
         translation = current_center
         
-        # Construct pose matrix
-        self.pose_in_reference_frame = np.eye(4)
-        self.pose_in_reference_frame[:3, :3] = R_ref_to_curr
-        self.pose_in_reference_frame[:3, 3] = translation
+        # Construct pose matrix from frame-to-frame tracking
+        pose_from_frame_to_frame = np.eye(4)
+        pose_from_frame_to_frame[:3, :3] = R_ref_to_curr
+        pose_from_frame_to_frame[:3, 3] = translation
+        
+        # Reference frame re-registration
+        should_reregister = False
+        if self.enable_reference_reregistration:
+            # Check if we should re-register (periodic or low fitness)
+            self.frame_count += 1
+            if (self.frame_count % self.reference_reregistration_interval == 0 or
+                result.fitness < self.reference_reregistration_min_fitness):
+                should_reregister = True
+        
+        if should_reregister:
+            ref_result = self._register_with_reference(current_pcd_processed)
+            if ref_result is not None:
+                T_ref_to_curr_ref, ref_fitness, ref_rmse = ref_result
+                
+                # Blend between frame-to-frame and reference-based poses based on confidence
+                # Use reference result more when frame-to-frame fitness is low
+                frame_to_frame_weight = result.fitness
+                ref_weight = ref_fitness
+                
+                # Normalize weights
+                total_weight = frame_to_frame_weight + ref_weight
+                if total_weight > 0:
+                    frame_to_frame_weight /= total_weight
+                    ref_weight /= total_weight
+                else:
+                    frame_to_frame_weight = 0.5
+                    ref_weight = 0.5
+                
+                # Blend rotations using SLERP
+                R_ref_to_curr_ref = T_ref_to_curr_ref[:3, :3]
+                R_ref_to_curr_frame = pose_from_frame_to_frame[:3, :3]
+                
+                rot_ref = scipyR.from_matrix(R_ref_to_curr_ref)
+                rot_frame = scipyR.from_matrix(R_ref_to_curr_frame)
+                
+                key_times = [0, 1]
+                key_rots = scipyR.from_matrix([rot_frame.as_matrix(), rot_ref.as_matrix()])
+                slerp = Slerp(key_times, key_rots)
+                blended_rotation = slerp([ref_weight])[0]
+                
+                # Blend translations
+                translation_ref = T_ref_to_curr_ref[:3, 3]
+                blended_translation = (frame_to_frame_weight * translation + 
+                                     ref_weight * translation_ref)
+                
+                # Update pose
+                self.pose_in_reference_frame = np.eye(4)
+                self.pose_in_reference_frame[:3, :3] = blended_rotation.as_matrix()
+                self.pose_in_reference_frame[:3, 3] = blended_translation
+                
+                print(f"Reference re-registration: fitness={ref_fitness:.3f}, "
+                      f"blended weights: frame={frame_to_frame_weight:.2f}, ref={ref_weight:.2f}")
+            else:
+                # Re-registration failed, use frame-to-frame result
+                self.pose_in_reference_frame = pose_from_frame_to_frame
+        else:
+            # No re-registration, use frame-to-frame result
+            self.pose_in_reference_frame = pose_from_frame_to_frame
         
         # Store current and previous point clouds 
         self.current_pcd_processed = current_pcd_processed
