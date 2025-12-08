@@ -289,6 +289,17 @@ class SAM2ICGTracker:
         self.current_pose = None
         self.last_icg_pose = None
         
+        # Progress tracking
+        self.progress_mode = args.progress_mode  # 'rotation', 'translation', or 'distance'
+        self.goal_rotation = args.goal_rotation  # degrees
+        self.goal_translation = args.goal_translation  # meters
+        self.goal_distance = args.goal_distance  # meters (euclidean)
+        self.progress_axis = args.progress_axis  # 'x', 'y', 'z', or 'auto' (not used for distance mode)
+        self.track_progress = args.progress_mode is not None
+        self.reference_frame_index = 4  # use 5th frame as reference for progress
+        self.reference_pose = None  # will be set at frame 5
+        self.last_detected_axis = None  # Track last detected axis for logging changes
+        
         # Mouse callback for bounding box
         self.mouse_data = {
             'drawing': False,
@@ -419,6 +430,176 @@ class SAM2ICGTracker:
 
         return T_model_to_camera
     
+    
+    def _detect_progress_axis(self, reference_pose, current_pose):
+        """
+        Automatically detect the axis with the most rotation/translation change.
+        This is called continuously to track the axis with highest displacement.
+        
+        Args:
+            reference_pose: numpy array (4, 4) - reference pose
+            current_pose: numpy array (4, 4) - current pose
+            
+        Returns:
+            str: 'x', 'y', or 'z' - the axis with maximum change
+        """
+        if self.progress_mode == 'rotation':
+            # Calculate relative rotation
+            R_ref = reference_pose[:3, :3]
+            R_curr = current_pose[:3, :3]
+            R_relative = R_curr @ R_ref.T
+            
+            # Euler angles for each axis
+            yaw = abs(np.degrees(np.arctan2(R_relative[1, 0], R_relative[0, 0]))) # z rotation
+            pitch = abs(np.degrees(np.arcsin(np.clip(-R_relative[2, 0], -1, 1)))) # y rotation
+            roll = abs(np.degrees(np.arctan2(R_relative[2, 1], R_relative[2, 2]))) # x rotation
+            
+            # axis with maximum rotation
+            rotations = {'x': roll, 'y': pitch, 'z': yaw}
+            max_axis = max(rotations, key=rotations.get)
+            return max_axis, rotations
+            
+        elif self.progress_mode == 'translation':
+            # translation difference
+            t_ref = reference_pose[:3, 3]
+            t_curr = current_pose[:3, 3]
+            t_diff = t_curr - t_ref
+            
+            # axis with maximum absolute translation
+            translations = {'x': abs(t_diff[0]), 'y': abs(t_diff[1]), 'z': abs(t_diff[2])}
+            max_axis = max(translations, key=translations.get)
+            return max_axis, translations
+        
+        return 'z', {}  # Default fallback
+    
+    def _calculate_progress(self):
+        """
+        Calculate progress percentage (0-100%) based on current pose vs reference pose.
+        Uses frame 5 (index 4) as reference instead of first frame.
+        
+        Returns:
+            float: Progress percentage (0-100), or None if not tracking progress
+        """
+        if not self.track_progress or self.reference_pose is None or self.current_pose is None:
+            return None
+        
+        # Distance mode does not need axis detection
+        if self.progress_mode == 'distance':
+            # euclidean distance
+            t_initial = self.reference_pose[:3, 3]
+            t_current = self.current_pose[:3, 3]
+            euclidean_distance = np.linalg.norm(t_current - t_initial)
+            
+            # progress percentage
+            if self.goal_distance == 0:
+                return 0.0
+            progress = (euclidean_distance / abs(self.goal_distance)) * 100.0
+            progress = np.clip(progress, 0, 100)
+            return progress
+        
+        # auto-detect axis continuously (for rotation and translation modes)
+        if self.progress_axis.lower() == 'auto':
+            # detect the axis with highest displacement
+            detected_axis, axis_values = self._detect_progress_axis(self.reference_pose, self.current_pose)
+            
+            # update and log if axis changed
+            if detected_axis != self.last_detected_axis:
+                self.last_detected_axis = detected_axis
+                
+                if self.args.verbose:
+                    if self.progress_mode == 'rotation':
+                        print(f"Auto-detected rotation axis: {detected_axis.upper()} "
+                            f"(angles: X={axis_values.get('x', 0):.2f}°, "
+                            f"Y={axis_values.get('y', 0):.2f} deg., "
+                            f"Z={axis_values.get('z', 0):.2f} deg.)")
+                    else:
+                        print(f"Auto-detected translation axis: {detected_axis.upper()} "
+                            f"(distances: X={axis_values.get('x', 0):.4f}m, "
+                            f"Y={axis_values.get('y', 0):.4f}m, "
+                            f"Z={axis_values.get('z', 0):.4f}m)")
+            
+            current_axis = detected_axis
+        else:
+            # use manually specified axis
+            current_axis = self.progress_axis.lower()
+        
+        if self.progress_mode == 'rotation':
+            # calc relative rotation
+            R_initial = self.reference_pose[:3, :3]
+            R_current = self.current_pose[:3, :3]
+            R_relative = R_current @ R_initial.T  # Relative rotation from reference to current
+            
+            # Extract rotation angle around specified axis
+            # convert rotation matrix to axis-angle representation
+            # R = I + sin(theta)*[k]_x + (1-cos(theta))*[k]_x^2
+            # k -> unit axis vector
+            # [k]_x -> skew-symmetric matrix
+            
+            # Extract axis-angle from rotation matrix
+            trace = np.trace(R_relative)
+            angle_rad = np.arccos(np.clip((trace - 1) / 2, -1, 1))
+            
+            # Get the axis vector from the skew-symmetric part
+            R_skew = (R_relative - R_relative.T) / (2 * np.sin(angle_rad) + 1e-8)
+            # Extract axis components: [k]_x = [[0, -kz, ky], [kz, 0, -kx], [-ky, kx, 0]]
+            axis_vec = np.array([R_skew[2, 1], R_skew[0, 2], R_skew[1, 0]])
+            axis_vec_normalized = axis_vec / (np.linalg.norm(axis_vec) + 1e-8)
+            
+            # determine which axis we're tracking
+            axis_idx = {'x': 0, 'y': 1, 'z': 2}[current_axis]
+            axis_direction = np.array([1.0 if i == axis_idx else 0.0 for i in range(3)])
+            
+            # project rotation axis onto the specified axis
+            axis_alignment = np.dot(axis_vec_normalized, axis_direction)
+            
+            # when rotation is primarily around the specified axis, use full angle
+            # -> else: extract the component along that axis
+            # (in case initial object orientation does not align with actual rotation axes)
+            if abs(axis_alignment) > 0.7:  # rot. is mostly around specified axis
+                # the full angle, with sign determined by axis alignment
+                angle_rad_signed = angle_rad * np.sign(axis_alignment)
+            else:
+                # euler angle around the specified axis
+                if current_axis == 'z':
+                    angle_rad_signed = np.arctan2(R_relative[1, 0], R_relative[0, 0])
+                elif current_axis == 'y':
+                    angle_rad_signed = np.arcsin(np.clip(-R_relative[2, 0], -1, 1))
+                else:  # current_axis == 'x'
+                    angle_rad_signed = np.arctan2(R_relative[2, 1], R_relative[2, 2])
+            
+            angle_deg = np.degrees(angle_rad_signed)
+            
+            # progress percentage (use absolute value)
+            if self.goal_rotation == 0:
+                return 0.0
+            progress = (abs(angle_deg) / abs(self.goal_rotation)) * 100.0
+            progress = np.clip(progress, 0, 100)
+            return progress
+            
+        elif self.progress_mode == 'translation':
+            # translation difference
+            t_initial = self.reference_pose[:3, 3]
+            t_current = self.current_pose[:3, 3]
+            t_diff = t_current - t_initial
+            
+            # project onto specified axis
+            axis_idx = {'x': 0, 'y': 1, 'z': 2}[current_axis]
+            translation_distance = t_diff[axis_idx]
+            
+            # calculate progress percentage
+            if self.goal_translation == 0:
+                return 0.0
+            
+            if self.goal_translation < 0:
+                # negative goal -> we want negative movement
+                progress = (translation_distance / self.goal_translation) * 100.0
+            else:
+                # positive goal -> use absolute value of movement
+                progress = (abs(translation_distance) / abs(self.goal_translation)) * 100.0
+            progress = np.clip(progress, 0, 100)
+            return progress
+        
+        return None
     
     def _render_model_overlay(self, mesh, T_model_to_camera, K, width, height):        
 
@@ -571,6 +752,7 @@ class SAM2ICGTracker:
             print("Setting initial pose in ICG tracker using StaticDetector...")
             self.icg_tracker.set_initial_pose_and_setup(initial_pose)
             self.current_pose = initial_pose
+            # Don't set reference pose yet - will be set at frame 5
             self.tracking_active = True
             # Start tracking
             self.icg_tracker.tracker.start_tracking()
@@ -587,6 +769,11 @@ class SAM2ICGTracker:
             # Get pose from icg
             if self.last_icg_pose is not None:
                 self.current_pose = self.last_icg_pose
+                
+                # Set reference pose at refeerence frame for progress tracking
+                if self.track_progress and self.frame_count == self.reference_frame_index:
+                    self.reference_pose = self.current_pose.copy()
+                    print(f"Reference pose set at frame {self.frame_count + 1} for progress tracking")
         
         # empty mask
         mask = np.zeros((rgb_frame.shape[0], rgb_frame.shape[1]), dtype=bool)
@@ -643,6 +830,63 @@ class SAM2ICGTracker:
             if self.current_pose is not None:
                 t = self.current_pose[:3, 3]
                 info_text.append(f"Position: [{t[0]:.3f}, {t[1]:.3f}, {t[2]:.3f}]")
+            
+            # Display progress if tracking
+            if self.track_progress:
+                if self.reference_pose is None:
+                    frames_until_ref = self.reference_frame_index - self.frame_count + 1
+                    if frames_until_ref > 0:
+                        info_text.append(f"Progress: Waiting for reference frame ({frames_until_ref} frames)...")
+                    else:
+                        info_text.append("Progress: Waiting for reference pose...")
+                else:
+                    progress = self._calculate_progress()
+                    if progress is not None:
+                        progress_text = f"Progress: {progress:.1f}%"
+                        if self.progress_mode == 'rotation':
+                            # display current axis (auto-detected or manual)
+                            if self.progress_axis.lower() == 'auto':
+                                axis_display = self.last_detected_axis.upper() if self.last_detected_axis else "auto"
+                            else:
+                                axis_display = self.progress_axis.upper()
+                            progress_text += f" ({self.goal_rotation} deg. around {axis_display})"
+                        elif self.progress_mode == 'translation':
+                            # display current axis (auto-detected or manual)
+                            if self.progress_axis.lower() == 'auto':
+                                axis_display = self.last_detected_axis.upper() if self.last_detected_axis else "auto"
+                            else:
+                                axis_display = self.progress_axis.upper()
+                            progress_text += f" ({self.goal_translation:.2f}m along {axis_display})"
+                        else:  # distance mode
+                            progress_text += f" ({self.goal_distance:.2f}m distance)"
+                        info_text.append(progress_text)
+                        
+                        # shoew progress bar only when progress is valid
+                        bar_width = 300
+                        bar_height = 20
+                        bar_x = 10
+                        bar_y = len(info_text) * 25 + 25
+                        
+                        # background
+                        cv2.rectangle(vis_frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (50, 50, 50), -1)
+                        fill_width = int(bar_width * progress / 100.0)
+                        # Color: blue to green gradient
+                        #color_ratio = progress / 100.0
+                        # bar_color = (
+                        #     int(255 * (1 - color_ratio)),
+                        #     int(255 * color_ratio),
+                        #     0
+                        # )
+                        bar_color = (0, 255, 0)
+                        cv2.rectangle(vis_frame, (bar_x, bar_y), (bar_x + fill_width, bar_y + bar_height), bar_color, -1)
+                        
+                        # border
+                        cv2.rectangle(vis_frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (255, 255, 255), 2)
+                    else:
+                        if self.progress_axis.lower() == 'auto' and self.last_detected_axis is None:
+                            info_text.append("Progress: Detecting axis...")
+                        else:
+                            info_text.append("Progress: Calculating...")
             
             y_offset = 20
             for i, text in enumerate(info_text):
@@ -729,6 +973,18 @@ def main():
     parser.add_argument("--render_model", action="store_true", help="Render model overlay")
     parser.add_argument("--save_frames", action="store_true", help="Save visualization frames to output directory")
     parser.add_argument("--output_dir", type=str, default="./data/output", help="Directory to save frames (default: /data/output)")
+    
+    # Progress tracking
+    parser.add_argument("--progress_mode", type=str, choices=['rotation', 'translation', 'distance'], default=None,
+                        help="Track progress: 'rotation' for doors, 'translation' for drawers, 'distance' for Euclidean distance")
+    parser.add_argument("--goal_rotation", type=float, default=90.0,
+                        help="Goal rotation in degrees (100% progress) for door opening (default: 90)")
+    parser.add_argument("--goal_translation", type=float, default=0.5,
+                        help="Goal translation in meters (100% progress) for drawer opening (default: 0.5)")
+    parser.add_argument("--goal_distance", type=float, default=0.5,
+                        help="Goal Euclidean distance in meters (100% progress) for distance mode (default: 0.5)")
+    parser.add_argument("--progress_axis", type=str, choices=['x', 'y', 'z', 'auto'], default='auto',
+                        help="Axis to track rot./transl. progress along: 'x', 'y', 'z', or 'auto' to auto-detect (default: 'auto')")
     
     args = parser.parse_args()
     
