@@ -323,3 +323,23 @@ def visualize_icp_alignment(scene_pcd, cad_pcd, transformation=None, show_in_cam
         point_show_normal=False
     )
 
+
+def overlay_rgba_on_bgr(frame_bgr, overlay_rgba):
+    if overlay_rgba is None or overlay_rgba.size == 0:
+        print("Overlay is empty -> returning original frame")
+        return frame_bgr
+
+    if overlay_rgba.shape[2] < 4:
+        print("Overlay has no alpha -> returning original frame")
+        return frame_bgr
+
+    overlay_rgb = overlay_rgba[:, :, :3]
+    alpha = overlay_rgba[:, :, 3:4] / 255.0
+
+    # Resize if needed
+    if overlay_rgb.shape[:2] != frame_bgr.shape[:2]:
+        overlay_rgb = cv2.resize(overlay_rgb, (frame_bgr.shape[1], frame_bgr.shape[0]))
+        alpha = cv2.resize(alpha, (frame_bgr.shape[1], frame_bgr.shape[0]))
+
+    blended = (alpha * overlay_rgb + (1 - alpha) * frame_bgr).astype(np.uint8)
+    return blended
