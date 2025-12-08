@@ -85,12 +85,13 @@ def preprocess_point_cloud(pcd, voxel_size=0.01, estimate_normals=True):
     return pcd
 
 
-def load_cad_model(file_path):
+def load_cad_model(file_path, scale_to_meters=0.001):
     """
     Load CAD model from file (supports .obj, .ply, .stl).
     
     Args:
         file_path: str - path to CAD model file
+        scale_to_meters: float - scale factor to convert units to meters
     
     Returns:
         open3d.geometry.TriangleMesh - loaded mesh
@@ -111,11 +112,13 @@ def load_cad_model(file_path):
     if not mesh.has_vertex_normals():
         mesh.compute_vertex_normals()
 
-    # scale to meter unit
-    mesh.scale(0.001, center=mesh.get_center())
+    # Scale to meter unit
+    mesh.scale(scale_to_meters, center=mesh.get_center())
+
+    mesh_center = mesh.get_center()
+    mesh.translate(-mesh_center)
     
     # Convert to point cloud for ICP (sample points from mesh surface)
-    # We'll use the mesh vertices directly, but could also sample uniformly
     pcd = mesh.sample_points_uniformly(number_of_points=10000)    
     
     return mesh, pcd

@@ -9,7 +9,7 @@ import torch
 import time
 import open3d as o3d
 
-# run: python articulation-sim/zed_sam2_icp_tracker.py --camera_source recorded --voxel_size 0.001 --visualize_point_clouds --enable_reference_reregistration --enable_rotation_constraints
+# run: python articulation-sim/sam2_icp_tracker.py --camera_source recorded --voxel_size 0.001 --visualize_point_clouds --enable_reference_reregistration --enable_rotation_constraints
 
 # parent directory to path to import SAM2 modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'sam2_video_predictor'))
