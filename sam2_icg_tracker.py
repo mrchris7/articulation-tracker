@@ -296,8 +296,8 @@ class SAM2ICGTracker:
         self.goal_distance = args.goal_distance  # meters (euclidean)
         self.progress_axis = args.progress_axis  # 'x', 'y', 'z', or 'auto' (not used for distance mode)
         self.track_progress = args.progress_mode is not None
-        self.reference_frame_index = 4  # use 5th frame as reference for progress
-        self.reference_pose = None  # will be set at frame 5
+        self.reference_frame_index = 10  # use 10th frame as reference for progress
+        self.reference_pose = None  # will be set at frame 10
         self.last_detected_axis = None  # Track last detected axis for logging changes
         
         # Mouse callback for bounding box

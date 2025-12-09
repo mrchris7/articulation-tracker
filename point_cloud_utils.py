@@ -117,6 +117,7 @@ def load_cad_model(file_path, scale_to_meters=0.001):
 
     mesh_center = mesh.get_center()
     mesh.translate(-mesh_center)
+    mesh.translate(np.array([0.0, 0.0, 0.035]))  # manual offset
     
     # Convert to point cloud for ICP (sample points from mesh surface)
     pcd = mesh.sample_points_uniformly(number_of_points=10000)    
