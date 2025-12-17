@@ -109,4 +109,85 @@ python sam2_icg_tracker.py \
 
 ## Setup and Installation
 
-TODO
+This project requires Python ≥ 3.11, PyTorch with CUDA support, SAM-2, and ICG pose estimation with Python bindings.
+
+#### 1. Create and activate a Conda environment
+```
+conda create -n articulation python=3.11 -y
+conda activate articulation
+```
+
+#### 2. Install PyTorch and TorchVision
+Install PyTorch>=2.3.1 and TorchVision>=0.18.1 by following the official instructions [here](https://pytorch.org/get-started/locally/).
+
+
+#### 3. Install SAM-2
+Clone the [SAM-2 repository](https://github.com/facebookresearch/sam2):
+```
+git clone https://github.com/facebookresearch/sam2.git
+cd sam2 
+```
+
+Install required Python dependencies:
+```
+pip install matplotlib opencv-python opencv-contrib-python
+```
+
+Install SAM-2 in editable mode:
+```
+pip install -e .
+```
+If there are dependency conflicts (e.g. PyTorch version warnings), reinstall using the flag ```--no-deps```.
+
+Download SAM-2 model checkpoints:
+```
+cd checkpoints && \
+./download_ckpts.sh && \
+cd ..
+
+```
+
+#### 4. Install ICG (with Python bindings)
+Next, install a slightly modified version of the [ICG](https://github.com/DLR-RM/3DObjectTracking/tree/master/ICG) pose estimation framework.
+This fork extends the original implementation by adding Python bindings enabling seamless integration with our Python-based codebase.
+ 
+
+Clone the custom branch that includes the Python bindings:
+```
+git clone --branch pybindings https://github.com/mrchris7/pose-estimation.git
+cd pose-estimation
+```
+
+Install system dependencies:
+```
+sudo apt-get install libglfw3-dev libeigen3-dev libglew-dev
+```
+
+Build the project:
+```
+cd build
+cmake ..
+cmake --build .
+```
+
+#### 5. Install the Articulation Tracker
+
+Clone this repository:
+```
+https://github.com/mrchris7/articulation-tracker.git
+cd articulation-tracker
+```
+
+Add additional Python dependencies:
+```
+pip install open3d
+```
+
+
+## Acknowledgements
+
+This project builds upon and integrates existing work. We would like to express our sincere gratitude to the authors and contributors of the following work:
+- Segment Anything Model 2 (SAM-2) available at: https://github.com/facebookresearch/sam2
+
+- Iterative Corresponding Geometry (ICG) available at: https://github.com/DLR-RM/3DObjectTracking/tree/master/ICG
+
