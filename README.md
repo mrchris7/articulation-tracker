@@ -174,7 +174,7 @@ cmake --build .
 
 Clone this repository:
 ```
-https://github.com/mrchris7/articulation-tracker.git
+git clone https://github.com/mrchris7/articulation-tracker.git
 cd articulation-tracker
 ```
 
