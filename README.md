@@ -80,19 +80,7 @@ Model-based tracking using ICG (Iterative Corresponding Geometry) with a CAD mod
 
 ## Demo
 
-The following example shows how to estimate the articulation state of a cabinet door by tracking the pose of the handle using the SAM2 + ICG Tracker. The progress is dependent on the current and a goal rotation.
-
-```
-python sam2_icg_tracker.py \
-    --camera_source recorded \
-    --recorded_root path/to/zed_stream \
-    --camera_metafile path/to/zed_color.yaml \
-    --body_metafile path/to/handle.yaml \
-    --cad_model_path path/to/handle.obj \
-    --progress_mode rotation \
-    --goal_rotation 90 \
-    --render_model
-```
+The following example shows how the articulation state of a cabinet door is estimated by tracking the pose of the handle using the SAM2 + ICG Tracker. The progress is dependent on the current and a given goal rotation.
 
 <p align="center">
  <img src="assets/sam2_bbox.png" width=550>
@@ -109,80 +97,11 @@ python sam2_icg_tracker.py \
 
 ## Setup and Installation
 
-This project requires Python ≥ 3.11, PyTorch with CUDA support, SAM-2, and ICG pose estimation with Python bindings.
+There are two ways to set up this project:
 
-#### 1. Create and activate a Conda environment
-```
-conda create -n articulation python=3.11 -y
-conda activate articulation
-```
+1. **ROS-Integrated Mode**: Uses ROS for communication between the ZED camera (zed-ros-wrapper), the articulation tracker and the ICG tracker. You can find the setup [installation_ros.md](installation_ros.md).
 
-#### 2. Install PyTorch and TorchVision
-Install PyTorch>=2.3.1 and TorchVision>=0.18.1 by following the official instructions [here](https://pytorch.org/get-started/locally/).
-
-
-#### 3. Install SAM-2
-Clone the [SAM-2 repository](https://github.com/facebookresearch/sam2):
-```
-git clone https://github.com/facebookresearch/sam2.git
-cd sam2 
-```
-
-Install required Python dependencies:
-```
-pip install matplotlib opencv-python opencv-contrib-python
-```
-
-Install SAM-2 in editable mode:
-```
-pip install -e .
-```
-If there are dependency conflicts (e.g. PyTorch version warnings), reinstall using the flag ```--no-deps```.
-
-Download SAM-2 model checkpoints:
-```
-cd checkpoints && \
-./download_ckpts.sh && \
-cd ..
-
-```
-
-#### 4. Install ICG (with Python bindings)
-Next, install a slightly modified version of the [ICG](https://github.com/DLR-RM/3DObjectTracking/tree/master/ICG) pose estimation framework.
-This fork extends the original implementation by adding Python bindings enabling seamless integration with our Python-based codebase.
- 
-
-Clone the custom branch that includes the Python bindings:
-```
-git clone --branch pybindings https://github.com/mrchris7/pose-estimation.git
-cd pose-estimation
-```
-
-Install system dependencies:
-```
-sudo apt-get install libglfw3-dev libeigen3-dev libglew-dev
-```
-
-Build the project:
-```
-cd build
-cmake ..
-cmake --build .
-```
-
-#### 5. Install the Articulation Tracker
-
-Clone this repository:
-```
-git clone https://github.com/mrchris7/articulation-tracker.git
-cd articulation-tracker
-```
-
-Add additional Python dependencies:
-```
-pip install open3d
-```
-
+2. **Direct API Mode**: Uses the Python API (Pyzed) of the ZED camera and Python bindings for direct communication between the articulation tracker and the ICG tracker. You can find the setup in [installation.md](installation.md).
 
 ## Acknowledgements
 
