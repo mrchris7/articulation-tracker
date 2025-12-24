@@ -1,0 +1,23 @@
+%YAML:1.2
+load_directory: "/data/scene0010_00/color"
+intrinsics:
+   f_u: 538.966370
+   f_v: 538.966370
+   pp_x: 633.757690
+   pp_y: 370.411285
+   width: 1280
+   height: 720
+camera2world_pose: !!opencv-matrix
+   rows: 4
+   cols: 4
+   dt: f
+   data: [ 1., 0., 0., 0.,
+            0., 1., 0., 0.,
+            0., 0., 1., 0.,
+            0., 0., 0., 1. ]
+depth_scale: 0.001    # only for depth camera
+image_name_pre: ""
+load_index: 0
+n_leading_zeros: 0
+image_name_post: ""
+load_image_type: "jpg"
