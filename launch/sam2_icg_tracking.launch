@@ -1,0 +1,63 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Arguments -->
+  <arg name="use_simulated_camera" default="true" />
+  <arg name="data_root" default="/rosbags/data/scene0010_00" />
+  <arg name="body_metafile" default="$(find pose_estimation)/ICG/examples/generator_handle/handle.yaml" />
+  <arg name="temp_directory" default="$(find articulation_tracker)/../temp_icg" />
+  <arg name="body_name" default="body" />
+  <arg name="zed_type" default="zed" />  <!-- (e.g., zed, zed2, etc.) -->
+  
+  <!-- ZED Simulator Node (if using simulated camera) -->
+  <group if="$(arg use_simulated_camera)">
+    <node name="zed_simulator_node" pkg="articulation_tracker" type="zed_simulator_node.py" output="screen">
+      <param name="zed_type" value="$(arg zed_type)" />
+      <param name="data_root" value="$(arg data_root)" />
+      <param name="color_subdir" value="color" />
+      <param name="depth_subdir" value="depth" />
+      <param name="fps" value="30.0" />
+    </node>
+  </group>
+  
+  <!-- ICG Tracker ROS Node -->
+  <node name="icg_tracker_ros_node" pkg="pose_estimation" type="icg_tracker_ros_node" output="screen">
+    <param name="body_metafile" value="$(arg body_metafile)" />
+    <param name="temp_directory" value="$(arg temp_directory)" />
+    <param name="body_name" value="$(arg body_name)" />
+  </node>
+  
+  <!-- SAM2 ICG Tracker ROS Node -->
+  <node 
+  name="sam2_icg_tracker_ros"
+  pkg="articulation_tracker"
+  type="sam2_icg_tracker_ros.py"
+  output="screen"
+  >
+    
+    <!-- SAM2 parameters -->
+    <param name="checkpoint" value="$(find articulation_tracker)/../sam2_video_predictor/checkpoints/sam2_hiera_small.pt" />
+    <param name="model_cfg" value="sam2_hiera_s.yaml" />
+
+    <!-- ZED type -->
+    <param name="zed_type" value="$(arg zed_type)" />
+    
+    <!-- Point cloud parameters -->
+    <param name="voxel_size" value="0.005" />
+    
+    <!-- CAD model parameters -->
+    <param name="cad_model_path" value="$(find pose_estimation)/ICG/examples/generator_handle/handle.obj" />
+    <param name="cad_scale" value="0.001" />
+    
+    <!-- Other parameters -->
+    <param name="render_model" value="false" />
+    <param name="save_frames" value="false" />
+    <param name="output_dir" value="$(find articulation_tracker)/output" />
+    
+    <!-- Progress tracking (optional) -->
+    <param name="progress_mode" value="rotation" />
+    <param name="goal_rotation" value="90.0" />
+    <param name="progress_axis" value="auto" />
+  </node>
+  
+</launch>
+
