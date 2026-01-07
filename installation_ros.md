@@ -14,6 +14,7 @@ This method uses ROS for communication between the ZED camera (zed-ros-wrapper),
 ```bash
 mkdir -p ~/catkin_ws/src
 cd ~/catkin_ws/src
+catkin init
 ```
 
 ## 2. Create and activate a Conda environment
@@ -44,10 +45,10 @@ pip install torch==2.3.1 torchvision==0.18.1 --index-url https://download.pytorc
 
 
 ## 6. Install SAM-2
-Clone the [SAM-2 repository](https://github.com/facebookresearch/sam2):
+Clone the SAM-2 video predictor repository based on [SAM-2 repository](https://github.com/facebookresearch/sam2):
 ```bash
-git clone https://github.com/facebookresearch/sam2.git
-cd sam2 
+git clone git@gitlab.pearl.informatik.tu-darmstadt.de:research/perception/sam2_video_predictor.git
+cd sam2_video_predictor
 ```
 
 Install required Python dependencies:
@@ -75,7 +76,7 @@ This fork extends the original implementation by adding the ROS commuication for
 
 Clone the custom branch that includes ROS communication:
 ```bash
-git clone --branch articulation_tracker_ros https://github.com/mrchris7/pose-estimation.git
+git clone --branch articulation-tracker-ros https://github.com/mrchris7/pose-estimation.git
 ```
 
 Install system dependencies:
@@ -88,7 +89,7 @@ sudo apt-get install libglfw3-dev libeigen3-dev libglew-dev
 
 Clone this ROS package:
 ```bash
-https://github.com/mrchris7/articulation-tracker.git
+git clone https://github.com/mrchris7/articulation-tracker.git
 cd articulation-tracker
 ```
 
@@ -97,12 +98,16 @@ Add additional Python dependencies:
 pip install open3d hydra-core iopath
 ```
 
-
 Make the nodes executable:
 ```bash
 chmod +x src/articulation_tracker/scripts/*.py
 ```
 
+## 9. Build the ROS package
+```bash
+cd ~/catkin_ws/src
+catkin build
+```
 
 # Usage
 

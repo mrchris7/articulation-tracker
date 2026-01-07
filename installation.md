@@ -18,10 +18,10 @@ Install PyTorch>=2.3.1 and TorchVision>=0.18.1 by following the official instruc
 
 
 ## 3. Install SAM-2
-Clone the [SAM-2 repository](https://github.com/facebookresearch/sam2):
+Clone the SAM-2 video predictor repository based on [SAM-2 repository](https://github.com/facebookresearch/sam2):
 ```bash
-git clone https://github.com/facebookresearch/sam2.git
-cd sam2 
+git clone git@gitlab.pearl.informatik.tu-darmstadt.de:research/perception/sam2_video_predictor.git
+cd sam2_video_predictor
 ```
 
 Install required Python dependencies:
@@ -69,7 +69,7 @@ cmake --build .
 
 Clone this repository:
 ```bash
-https://github.com/mrchris7/articulation-tracker.git
+git clone https://github.com/mrchris7/articulation-tracker.git
 cd articulation-tracker
 ```
 

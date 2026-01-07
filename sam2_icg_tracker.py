@@ -12,7 +12,7 @@ Pipeline:
 """
 
 # run: cd pose-estimation/ICG/build && make -j && cd ../../..
-# run: python articulation-sim/sam2_icg_tracker.py --camera_source recorded --camera_metafile pose-estimation/ICG/examples/pearl_lab/zed_color.yaml --body_metafile pose-estimation/ICG/examples/pearl_lab/handle.yaml --cad_model_path pose-estimation/ICG/examples/pearl_lab/handle.obj --render_model
+# run: python articulation-tracker/sam2_icg_tracker.py --camera_source recorded --camera_metafile articulation-tracker/meta_files/zed_color.yaml --body_metafile articulation-tracker/meta_files/handle.yaml --cad_model_path articulation-tracker/meta_files/handle.obj --render_model
 
 import sys
 import os
@@ -962,9 +962,9 @@ def main():
     parser.add_argument("--voxel_size", type=float, default=0.005, help="Voxel size for point cloud processing")
     
     # ICG parameters
-    parser.add_argument("--camera_metafile", type=str, default="pose-estimation/ICG/examples/pearl_lab/zed_color.yaml")
-    parser.add_argument("--body_metafile", type=str, default="pose-estimation/ICG/examples/pearl_lab/handle.yaml")
-    parser.add_argument("--cad_model_path", type=str, default="pose-estimation/ICG/examples/pearl_lab/handle.obj")
+    parser.add_argument("--camera_metafile", type=str, default="articulation-tracker/meta_files/zed_color.yaml")
+    parser.add_argument("--body_metafile", type=str, default="articulation-tracker/meta_files/handle.yaml")
+    parser.add_argument("--cad_model_path", type=str, default="articulation-tracker/meta_files/handle.obj")
     parser.add_argument("--cad_scale", type=float, default=0.001, help="Scale factor to convert units of cad model to meters")
     parser.add_argument("--temp_directory", type=str, default="./temp_icg")
     

@@ -709,7 +709,7 @@ def main():
     voxel_size = rospy.get_param("~voxel_size", 0.005)
 
     # CAD model
-    cad_model_path = rospy.get_param("~cad_model_path", "pose-estimation/ICG/examples/pearl_lab/handle.obj")
+    cad_model_path = rospy.get_param("~cad_model_path", "articulation-tracker/meta_files/handle.obj")
     cad_scale = rospy.get_param("~cad_scale", 0.001)
 
     # Other options

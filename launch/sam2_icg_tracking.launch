@@ -3,7 +3,7 @@
   <!-- Arguments -->
   <arg name="use_simulated_camera" default="true" />
   <arg name="data_root" default="/rosbags/data/scene0010_00" />
-  <arg name="body_metafile" default="$(find pose_estimation)/ICG/examples/generator_handle/handle.yaml" />
+  <arg name="body_metafile" default="$(find articulation_tracker)/meta_files/handle.yaml" />
   <arg name="temp_directory" default="$(find articulation_tracker)/../temp_icg" />
   <arg name="body_name" default="body" />
   <arg name="zed_type" default="zed" />  <!-- (e.g., zed, zed2, etc.) -->
@@ -45,7 +45,7 @@
     <param name="voxel_size" value="0.005" />
     
     <!-- CAD model parameters -->
-    <param name="cad_model_path" value="$(find pose_estimation)/ICG/examples/generator_handle/handle.obj" />
+    <param name="cad_model_path" value="$(find articulation_tracker)/meta_files/handle.obj" />
     <param name="cad_scale" value="0.001" />
     
     <!-- Other parameters -->
