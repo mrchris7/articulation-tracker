@@ -25,12 +25,15 @@ import rospy
 import threading
 from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import Pose, PoseArray
+from std_msgs.msg import Float32
 from cv_bridge import CvBridge
 import message_filters
 from scipy.spatial.transform import Rotation as R
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'sam2_video_predictor'))
 from sam2.build_sam import build_sam2_camera_predictor
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'sam2_video_predictor'))
+from cam_utils import resize_K
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from point_cloud_utils import *
 from visualization_utils import draw_pose_axes, overlay_mask, overlay_rgba_on_bgr
@@ -43,6 +46,15 @@ class SAM2ICGTrackerROS:
     def __init__(self, args):
         """Initialize tracker."""
         self.args = args
+        
+        # Image resize parameters
+        self.target_width = rospy.get_param('~target_width', None)
+        self.target_height = rospy.get_param('~target_height', None)
+        
+        # self.bbox_start_y = rospy.get_param('~bbox_start_y', None)
+        # self.bbox_start_x = rospy.get_param('~bbox_start_x', None)
+        # self.bbox_end_y = rospy.get_param('~bbox_end_y', None)
+        # self.bbox_end_x = rospy.get_param('~bbox_end_x', None)
         
         self.bridge = CvBridge()
         
@@ -61,6 +73,12 @@ class SAM2ICGTrackerROS:
         
         # Subscribe to poses from pose-estimation
         self.pose_sub = rospy.Subscriber('/pose_estimation/poses', PoseArray, self.pose_callback)
+        
+        # Publishers for current and reference poses
+        self.current_pose_pub = rospy.Publisher('/sam2_icg_tracker/current_pose', Pose, queue_size=10)
+        self.reference_pose_pub = rospy.Publisher('/sam2_icg_tracker/reference_pose', Pose, queue_size=10)
+        self.euclidean_dist_pub = rospy.Publisher('/sam2_icg_tracker/euclidean_dist', Float32, queue_size=10)
+        self.rotation_pub = rospy.Publisher('/sam2_icg_tracker/rotation', Float32, queue_size=10)
         
         # Service client for setting initial pose
         rospy.wait_for_service('/pose_estimation/set_initial_pose')
@@ -148,6 +166,30 @@ class SAM2ICGTrackerROS:
             # Extract camera intrinsic from CameraInfo
             K = np.array(camera_info_msg.K).reshape(3, 3)
             
+            # Center crop images if target size is specified
+            if self.target_width is not None and self.target_height is not None:
+                original_height, original_width = rgb.shape[:2]
+                crop_width = min(self.target_width, original_width)
+                crop_height = min(self.target_height, original_height)
+                
+                # Calculate center crop coordinates
+                x1 = (original_width - crop_width) // 2
+                y1 = (original_height - crop_height) // 2
+                x2 = x1 + crop_width
+                y2 = y1 + crop_height
+                
+                # Crop RGB image (numpy indexing: [rows, cols] = [y, x])
+                rgb = rgb[y1:y2, x1:x2]
+                
+                # Crop depth image
+                depth = depth[y1:y2, x1:x2]
+                
+                # Adjust camera intrinsics for cropping
+                # Focal lengths stay the same, but principal point shifts
+                K = K.copy()
+                K[0, 2] = K[0, 2] - x1  # cx
+                K[1, 2] = K[1, 2] - y1  # cy
+            
             with self.frame_lock:
                 self.latest_rgb = rgb
                 self.latest_depth = depth
@@ -173,6 +215,121 @@ class SAM2ICGTrackerROS:
                 if self.track_progress and self.frame_count == self.reference_frame_index:
                     self.reference_pose = self.current_pose.copy()
                     print(f"Reference pose set at frame {self.frame_count + 1} for progress tracking")
+            
+                self.publish_update()
+
+    def publish_update(self):
+
+        # publish current pose
+        if self.current_pose is not None:
+            current_pose_msg = self.matrix_to_pose(self.current_pose)
+            self.current_pose_pub.publish(current_pose_msg)
+
+        # publish reference pose
+        if self.reference_pose is not None:
+            reference_pose_msg = self.matrix_to_pose(self.reference_pose)
+            self.reference_pose_pub.publish(reference_pose_msg)
+        else:
+            print("No reference pose found")
+        
+        if self.reference_pose is not None and self.current_pose is not None:
+            
+            # publish euclidean distance
+            t_initial = self.reference_pose[:3, 3]
+            t_current = self.current_pose[:3, 3]
+            euclidean_distance = np.linalg.norm(t_current - t_initial)
+            self.euclidean_dist_pub.publish(euclidean_distance)
+
+            # publish rotation (auto detected axis)
+            detected_axis, axis_values = self._detect_progress_axis(self.reference_pose, self.current_pose)
+            degrees = self._estimate_angle(detected_axis)
+            self.rotation_pub.publish(degrees)
+        
+
+    def _calculate_progress(self):
+        """Calculate progress percentage (0-100%) based on current pose vs reference pose."""
+        if not self.track_progress or self.reference_pose is None or self.current_pose is None:
+            return None
+        
+        if self.progress_mode == 'distance':
+            t_initial = self.reference_pose[:3, 3]
+            t_current = self.current_pose[:3, 3]
+            euclidean_distance = np.linalg.norm(t_current - t_initial)
+            
+            if self.goal_distance == 0:
+                return 0.0
+            progress = (euclidean_distance / abs(self.goal_distance)) * 100.0
+            progress = np.clip(progress, 0, 100)
+            return progress
+        
+        if self.progress_axis.lower() == 'auto':
+            detected_axis, axis_values = self._detect_progress_axis(self.reference_pose, self.current_pose)
+            
+            if detected_axis != self.last_detected_axis:
+                self.last_detected_axis = detected_axis
+                if self.args.verbose:
+                    if self.progress_mode == 'rotation':
+                        print(f"Auto-detected rotation axis: {detected_axis.upper()}")
+                    else:
+                        print(f"Auto-detected translation axis: {detected_axis.upper()}")
+            
+            current_axis = detected_axis
+        else:
+            current_axis = self.progress_axis.lower()
+        
+        if self.progress_mode == 'rotation':
+            R_initial = self.reference_pose[:3, :3]
+            R_current = self.current_pose[:3, :3]
+            R_relative = R_current @ R_initial.T
+            
+            trace = np.trace(R_relative)
+            angle_rad = np.arccos(np.clip((trace - 1) / 2, -1, 1))
+            
+            R_skew = (R_relative - R_relative.T) / (2 * np.sin(angle_rad) + 1e-8)
+            axis_vec = np.array([R_skew[2, 1], R_skew[0, 2], R_skew[1, 0]])
+            axis_vec_normalized = axis_vec / (np.linalg.norm(axis_vec) + 1e-8)
+            
+            axis_idx = {'x': 0, 'y': 1, 'z': 2}[current_axis]
+            axis_direction = np.array([1.0 if i == axis_idx else 0.0 for i in range(3)])
+            axis_alignment = np.dot(axis_vec_normalized, axis_direction)
+            
+            if abs(axis_alignment) > 0.7:
+                angle_rad_signed = angle_rad * np.sign(axis_alignment)
+            else:
+                if current_axis == 'z':
+                    angle_rad_signed = np.arctan2(R_relative[1, 0], R_relative[0, 0])
+                elif current_axis == 'y':
+                    angle_rad_signed = np.arcsin(np.clip(-R_relative[2, 0], -1, 1))
+                else:
+                    angle_rad_signed = np.arctan2(R_relative[2, 1], R_relative[2, 2])
+            
+            angle_deg = np.degrees(angle_rad_signed)
+            
+            if self.goal_rotation == 0:
+                return 0.0
+            progress = (abs(angle_deg) / abs(self.goal_rotation)) * 100.0
+            progress = np.clip(progress, 0, 100)
+            return progress
+            
+        elif self.progress_mode == 'translation':
+            t_initial = self.reference_pose[:3, 3]
+            t_current = self.current_pose[:3, 3]
+            t_diff = t_current - t_initial
+            
+            axis_idx = {'x': 0, 'y': 1, 'z': 2}[current_axis]
+            translation_distance = t_diff[axis_idx]
+            
+            if self.goal_translation == 0:
+                return 0.0
+            
+            if self.goal_translation < 0:
+                progress = (translation_distance / self.goal_translation) * 100.0
+            else:
+                progress = (abs(translation_distance) / abs(self.goal_translation)) * 100.0
+            progress = np.clip(progress, 0, 100)
+            return progress
+        
+        return None
     
     def pose_to_matrix(self, pose_msg):
         """Convert geometry_msgs/Pose to 4x4 transformation matrix."""
@@ -330,6 +487,14 @@ class SAM2ICGTrackerROS:
         # Get bounding box
         bbox = self.mouse_data['bbox']
         bbox_array = np.array([bbox[0][0], bbox[0][1], bbox[1][0], bbox[1][1]], dtype=np.float32)
+            
+        # if self.bbox_start_y is None or self.bbox_start_x is None or self.bbox_end_y is None or self.bbox_end_x is None:
+        #     bbox = self.mouse_data['bbox']
+        #     bbox_array = np.array([bbox[0][0], bbox[0][1], bbox[1][0], bbox[1][1]], dtype=np.float32)
+        #     print("stored bbox_array: ", bbox_array)
+        # else:
+        #     bbox_array = np.array([self.bbox_start_y, self.bbox_start_x, self.bbox_end_y, self.bbox_end_x], dtype=np.float32)
+        #     print("loaded bbox_array: ", bbox_array)
         
         # Run SAM2
         print("Running SAM2 on first frame...")
@@ -464,32 +629,7 @@ class SAM2ICGTrackerROS:
             current_axis = self.progress_axis.lower()
         
         if self.progress_mode == 'rotation':
-            R_initial = self.reference_pose[:3, :3]
-            R_current = self.current_pose[:3, :3]
-            R_relative = R_current @ R_initial.T
-            
-            trace = np.trace(R_relative)
-            angle_rad = np.arccos(np.clip((trace - 1) / 2, -1, 1))
-            
-            R_skew = (R_relative - R_relative.T) / (2 * np.sin(angle_rad) + 1e-8)
-            axis_vec = np.array([R_skew[2, 1], R_skew[0, 2], R_skew[1, 0]])
-            axis_vec_normalized = axis_vec / (np.linalg.norm(axis_vec) + 1e-8)
-            
-            axis_idx = {'x': 0, 'y': 1, 'z': 2}[current_axis]
-            axis_direction = np.array([1.0 if i == axis_idx else 0.0 for i in range(3)])
-            axis_alignment = np.dot(axis_vec_normalized, axis_direction)
-            
-            if abs(axis_alignment) > 0.7:
-                angle_rad_signed = angle_rad * np.sign(axis_alignment)
-            else:
-                if current_axis == 'z':
-                    angle_rad_signed = np.arctan2(R_relative[1, 0], R_relative[0, 0])
-                elif current_axis == 'y':
-                    angle_rad_signed = np.arcsin(np.clip(-R_relative[2, 0], -1, 1))
-                else:
-                    angle_rad_signed = np.arctan2(R_relative[2, 1], R_relative[2, 2])
-            
-            angle_deg = np.degrees(angle_rad_signed)
+            angle_deg = self._estimate_angle(current_axis)
             
             if self.goal_rotation == 0:
                 return 0.0
@@ -498,12 +638,7 @@ class SAM2ICGTrackerROS:
             return progress
             
         elif self.progress_mode == 'translation':
-            t_initial = self.reference_pose[:3, 3]
-            t_current = self.current_pose[:3, 3]
-            t_diff = t_current - t_initial
-            
-            axis_idx = {'x': 0, 'y': 1, 'z': 2}[current_axis]
-            translation_distance = t_diff[axis_idx]
+            translation_distance = self._estimate_translation_distance(current_axis)
             
             if self.goal_translation == 0:
                 return 0.0
@@ -516,6 +651,44 @@ class SAM2ICGTrackerROS:
             return progress
         
         return None
+    
+    def _estimate_angle(self, current_axis):
+        R_initial = self.reference_pose[:3, :3]
+        R_current = self.current_pose[:3, :3]
+        R_relative = R_current @ R_initial.T
+        
+        trace = np.trace(R_relative)
+        angle_rad = np.arccos(np.clip((trace - 1) / 2, -1, 1))
+        
+        R_skew = (R_relative - R_relative.T) / (2 * np.sin(angle_rad) + 1e-8)
+        axis_vec = np.array([R_skew[2, 1], R_skew[0, 2], R_skew[1, 0]])
+        axis_vec_normalized = axis_vec / (np.linalg.norm(axis_vec) + 1e-8)
+        
+        axis_idx = {'x': 0, 'y': 1, 'z': 2}[current_axis]
+        axis_direction = np.array([1.0 if i == axis_idx else 0.0 for i in range(3)])
+        axis_alignment = np.dot(axis_vec_normalized, axis_direction)
+        
+        if abs(axis_alignment) > 0.7:
+            angle_rad_signed = angle_rad * np.sign(axis_alignment)
+        else:
+            if current_axis == 'z':
+                angle_rad_signed = np.arctan2(R_relative[1, 0], R_relative[0, 0])
+            elif current_axis == 'y':
+                angle_rad_signed = np.arcsin(np.clip(-R_relative[2, 0], -1, 1))
+            else:
+                angle_rad_signed = np.arctan2(R_relative[2, 1], R_relative[2, 2])
+        
+        angle_deg = np.degrees(angle_rad_signed)
+        return angle_deg
+
+    def _estimate_translation_distance(self, current_axis):
+        t_initial = self.reference_pose[:3, 3]
+        t_current = self.current_pose[:3, 3]
+        t_diff = t_current - t_initial
+        
+        axis_idx = {'x': 0, 'y': 1, 'z': 2}[current_axis]
+        translation_distance = t_diff[axis_idx]
+        return translation_distance
     
     def _render_model_overlay(self, mesh, T_model_to_camera, K, width, height):
         """Render model overlay on image."""
@@ -717,6 +890,10 @@ def main():
     render_model = rospy.get_param("~render_model", False)
     save_frames = rospy.get_param("~save_frames", False)
     output_dir = rospy.get_param("~output_dir", "./data/output")
+    
+    # Image resize parameters (None means no resizing)
+    image_width = rospy.get_param("~image_width", None)
+    image_height = rospy.get_param("~image_height", None)
 
     # Progress tracking
     progress_mode = rospy.get_param("~progress_mode", None)
@@ -745,6 +922,8 @@ def main():
     args.render_model = render_model
     args.save_frames = save_frames
     args.output_dir = output_dir
+    args.image_width = image_width
+    args.image_height = image_height
     args.progress_mode = progress_mode
     args.goal_rotation = goal_rotation
     args.goal_translation = goal_translation

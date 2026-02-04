@@ -6,11 +6,15 @@
   <arg name="body_metafile" default="$(find articulation_tracker)/meta_files/handle.yaml" />
   <arg name="temp_directory" default="$(find articulation_tracker)/../temp_icg" />
   <arg name="body_name" default="body" />
-  <arg name="zed_type" default="zed" />  <!-- (e.g., zed, zed2, etc.) -->
+  <arg name="zed_type" default="zed2i" />  <!-- (e.g., zed, zed2, etc.) -->
   
   <!-- ZED Simulator Node (if using simulated camera) -->
   <group if="$(arg use_simulated_camera)">
-    <node name="zed_simulator_node" pkg="articulation_tracker" type="zed_simulator_node.py" output="screen">
+    <node
+    name="zed_simulator_node" 
+    pkg="articulation_tracker"
+    type="zed_simulator_node_sys.sh"
+    output="screen">
       <param name="zed_type" value="$(arg zed_type)" />
       <param name="data_root" value="$(arg data_root)" />
       <param name="color_subdir" value="color" />
@@ -30,7 +34,7 @@
   <node 
   name="sam2_icg_tracker_ros"
   pkg="articulation_tracker"
-  type="sam2_icg_tracker_ros.py"
+  type="sam2_icg_tracker_conda.sh"
   output="screen"
   >
     
@@ -49,7 +53,7 @@
     <param name="cad_scale" value="0.001" />
     
     <!-- Other parameters -->
-    <param name="render_model" value="false" />
+    <param name="render_model" value="true" />
     <param name="save_frames" value="false" />
     <param name="output_dir" value="$(find articulation_tracker)/output" />
     
@@ -57,6 +61,16 @@
     <param name="progress_mode" value="rotation" />
     <param name="goal_rotation" value="90.0" />
     <param name="progress_axis" value="auto" />
+
+    <!-- <param name="target_width" value="380" /> -->
+    <!-- <param name="target_height" value="330" /> -->
+
+    <!-- <param name="bbox_start_y" value="100" /> -->
+    <!-- <param name="bbox_start_x" value="120" /> -->
+    <!-- <param name="bbox_end_y" value="130" /> -->
+    <!-- <param name="bbox_end_x" value="170" /> -->
+    
+
   </node>
   
 </launch>

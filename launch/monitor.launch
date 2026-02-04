@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- Monitor Node -->
+    <node 
+    name="monitor_node"
+    pkg="articulation_tracker"
+    type="monitor_node.py"
+    output="screen"
+    />
+</launch>

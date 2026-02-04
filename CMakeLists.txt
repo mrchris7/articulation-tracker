@@ -10,6 +10,9 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
 )
 
+find_package(GDAL REQUIRED)  # Added search for GDAL
+find_package(TIFF REQUIRED)   # Added search for TIFF
+
 catkin_package(
   CATKIN_DEPENDS rospy sensor_msgs geometry_msgs cv_bridge image_transport message_runtime
 )
@@ -17,6 +20,7 @@ catkin_package(
 catkin_install_python(PROGRAMS
   scripts/sam2_icg_tracker_ros.py
   scripts/zed_simulator_node.py
+  scripts/monitor_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
