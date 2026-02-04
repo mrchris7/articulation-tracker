@@ -56,6 +56,17 @@ class SAM2ICGTrackerROS:
         # self.bbox_end_y = rospy.get_param('~bbox_end_y', None)
         # self.bbox_end_x = rospy.get_param('~bbox_end_x', None)
         
+        # Optional: detector YAML with body2world_pose to skip SAM/RANSAC initialization
+        detector_yaml_path = rospy.get_param('~detector_yaml', '')
+        self.predefined_pose = None
+        if detector_yaml_path:
+            self.predefined_pose = self._load_pose_from_yaml(detector_yaml_path)
+            if self.predefined_pose is not None:
+                print(f"Loaded body2world_pose from {detector_yaml_path}")
+                print("Will skip SAM segmentation, point cloud extraction, and RANSAC initialization")
+            else:
+                print(f"Warning: Failed to load pose from {detector_yaml_path}, will use normal initialization")
+        
         self.bridge = CvBridge()
         
         # Subscribers
@@ -365,6 +376,38 @@ class SAM2ICGTrackerROS:
         pose.orientation.w = float(q[3])
         
         return pose
+    
+    def _load_pose_from_yaml(self, yaml_path):
+        """
+        Load body2world_pose from OpenCV YAML file.
+        
+        Args:
+            yaml_path: Path to YAML file containing body2world_pose
+            
+        Returns:
+            numpy array (4, 4) pose matrix, or None if failed
+        """
+        try:
+            fs = cv2.FileStorage(yaml_path, cv2.FILE_STORAGE_READ)
+            if not fs.isOpened():
+                print(f"Error: Could not open YAML file {yaml_path}")
+                return None
+            
+            # Read the matrix
+            pose_matrix = fs.getNode("body2world_pose").mat()
+            fs.release()
+            
+            if pose_matrix is None or pose_matrix.shape != (4, 4):
+                print(f"Error: Invalid pose matrix in YAML file {yaml_path}")
+                return None
+            
+            # Convert to numpy array
+            pose_np = np.array(pose_matrix, dtype=np.float64)
+            return pose_np
+            
+        except Exception as e:
+            print(f"Error loading pose from YAML {yaml_path}: {e}")
+            return None
     
     def mouse_callback(self, event, x, y, flags, param):
         """Mouse callback for drawing bounding box."""
@@ -745,9 +788,36 @@ class SAM2ICGTrackerROS:
             depth_frame = self.latest_depth.copy()
         
         # Initialize
-        if not self.initialize_tracking(rgb_frame, depth_frame):
-            print("Initialization failed")
-            return
+        if self.predefined_pose is not None:
+            # Use predefined pose from YAML, skip SAM/RANSAC
+            print("\n=== Using Predefined Pose from YAML ===")
+            print("Skipping SAM segmentation, point cloud extraction, and RANSAC")
+            
+            # Send initial pose to pose-estimation via service
+            print("Sending predefined pose to pose-estimation...")
+            try:
+                initial_pose_msg = self.matrix_to_pose(self.predefined_pose)
+                resp = self.set_initial_pose_client(
+                    initial_pose_msg,
+                    "body"
+                )
+
+                if resp.success:
+                    print("Initial pose set successfully in pose-estimation")
+                    self.current_pose = self.predefined_pose.copy()
+                    self.tracking_active = True
+                    self.initialized = True
+                else:
+                    print(f"Failed to set initial pose: {resp.message}")
+                    return
+            except rospy.ServiceException as e:
+                print(f"Service call failed: {e}")
+                return
+        else:
+            # Normal initialization with SAM/RANSAC
+            if not self.initialize_tracking(rgb_frame, depth_frame):
+                print("Initialization failed")
+                return
         
         print("\n=== Tracking Active ===")
         print("Press 'q' to quit")

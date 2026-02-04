@@ -7,6 +7,7 @@
   <arg name="temp_directory" default="$(find articulation_tracker)/../temp_icg" />
   <arg name="body_name" default="body" />
   <arg name="zed_type" default="zed2i" />  <!-- (e.g., zed, zed2, etc.) -->
+  <arg name="detector_yaml" default="" />  <!-- Optional: path to YAML file with body2world_pose to skip SAM/RANSAC initialization -->
   
   <!-- ZED Simulator Node (if using simulated camera) -->
   <group if="$(arg use_simulated_camera)">
@@ -70,6 +71,8 @@
     <!-- <param name="bbox_end_y" value="130" /> -->
     <!-- <param name="bbox_end_x" value="170" /> -->
     
+    <!-- Optional: detector YAML with body2world_pose to skip SAM/RANSAC initialization -->
+    <param name="detector_yaml" value="$(arg detector_yaml)" />
 
   </node>
   
