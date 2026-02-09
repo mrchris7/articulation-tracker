@@ -1,0 +1,56 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Arguments -->
+  <arg name="use_simulated_camera" default="true" />
+  <arg name="data_root" default="/rosbags/data/scene0010_00" />
+  <arg name="body_metafile" default="$(find articulation_tracker)/meta_files/handle.yaml" />
+  <arg name="zed_type" default="zed2i" />  <!-- (e.g., zed, zed2, etc.) -->
+  <arg name="detector_yaml" default="" />  <!-- path to YAML file with body2world_pose -->
+  
+  <!-- ZED Simulator Node (if using simulated camera) -->
+  <group if="$(arg use_simulated_camera)">
+    <node
+    name="zed_simulator_node" 
+    pkg="articulation_tracker"
+    type="zed_simulator_node_sys.sh"
+    output="screen">
+      <param name="zed_type" value="$(arg zed_type)" />
+      <param name="data_root" value="$(arg data_root)" />
+      <param name="color_subdir" value="color" />
+      <param name="depth_subdir" value="depth" />
+      <param name="fps" value="30.0" />
+    </node>
+  </group>
+  
+  
+  <!-- Pose Configurator Node -->
+  <node 
+  name="pose_configurator"
+  pkg="articulation_tracker"
+  type="pose_configurator_conda.sh"
+  output="screen"
+  >
+
+    <!-- ZED type -->
+    <param name="zed_type" value="$(arg zed_type)" />
+    
+    <!-- detector YAML with body2world_pose -->
+    <param name="detector_yaml" value="$(arg detector_yaml)" />
+
+    <!-- Point cloud parameters -->
+    <param name="voxel_size" value="0.005" />
+    
+    <!-- CAD model parameters -->
+    <param name="cad_model_path" value="$(find articulation_tracker)/meta_files/handle.obj" />
+    <param name="cad_scale" value="0.001" />
+    
+    <!-- Other parameters -->
+    <param name="render_model" value="true" />
+    
+    <!-- <param name="target_width" value="380" /> -->
+    <!-- <param name="target_height" value="330" /> -->
+
+  </node>
+  
+</launch>
+

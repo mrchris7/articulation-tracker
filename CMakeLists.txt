@@ -21,6 +21,7 @@ catkin_install_python(PROGRAMS
   scripts/sam2_icg_tracker_ros.py
   scripts/zed_simulator_node.py
   scripts/monitor_node.py
+  scripts/pose_configurator.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
