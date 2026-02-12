@@ -132,7 +132,7 @@ def configure_pose(key, pose):
         return pose
 
     # Apply incremental transform
-    pose = delta @ pose
+    pose = pose @ delta
 
     # Debug print
     #pos = pose[:3, 3]

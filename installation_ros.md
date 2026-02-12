@@ -137,3 +137,15 @@ roslaunch articulation_tracker sam2_icg_tracking.launch \
     camera_metafile:=path/to/zed_color.yaml \
     body_metafile:=path/to/handle.yaml
 ```
+
+
+## Use an Initial Pose
+
+There is the option to provide the articulation tracker with a fixed pose (body2world pose) for initialization using ```detector_yaml:=path/to/detector.yaml```. If it is provided, the semantic segmentation with SAM and the RANSAC procedure will be skipped.
+
+To determine an initial pose you can use the pose configurator that allows to load, modify and save a given pose using keyboard controls:
+```bash
+roslaunch articulation_tracker pose_configurator.launch \
+    use_simulated_camera:=false /
+    detector_yaml:=path/to/detector.yaml /
+```

@@ -240,8 +240,6 @@ class SAM2ICGTrackerROS:
         if self.reference_pose is not None:
             reference_pose_msg = self.matrix_to_pose(self.reference_pose)
             self.reference_pose_pub.publish(reference_pose_msg)
-        else:
-            print("No reference pose found")
         
         if self.reference_pose is not None and self.current_pose is not None:
             
