@@ -872,10 +872,10 @@ class SAM2ICGTrackerROS:
                         info_text.append(progress_text)
                         
                         # Progress bar
-                        bar_width = 300
-                        bar_height = 20
+                        bar_width = 100  # 300
+                        bar_height = 12  # 20
                         bar_x = 10
-                        bar_y = len(info_text) * 25 + 25
+                        bar_y = len(info_text) * 25 + 0  # +25
                         
                         cv2.rectangle(vis_frame, (bar_x, bar_y), (bar_x + bar_width, bar_y + bar_height), (50, 50, 50), -1)
                         fill_width = int(bar_width * progress / 100.0)
@@ -888,11 +888,11 @@ class SAM2ICGTrackerROS:
                 cv2.putText(
                     vis_frame,
                     text,
-                    (10, y_offset + i * 25),
+                    (10, y_offset + i * 15),  # *25
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
+                    0.3,  # 0.5
                     (0, 255, 0),
-                    2
+                    1  # 2
                 )
             
             # FPS
@@ -903,9 +903,9 @@ class SAM2ICGTrackerROS:
                 f"FPS: {fps:.1f}",
                 (10, vis_frame.shape[0] - 20),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
+                0.3,  # 0.5
                 (0, 255, 0),
-                2
+                1  # 2
             )
             
             if self.args.render_model and self.current_pose is not None:

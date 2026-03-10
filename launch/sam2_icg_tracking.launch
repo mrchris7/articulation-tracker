@@ -63,8 +63,8 @@
     <param name="goal_rotation" value="90.0" />
     <param name="progress_axis" value="auto" />
 
-    <!-- <param name="target_width" value="380" /> -->
-    <!-- <param name="target_height" value="330" /> -->
+    <param name="target_width" value="400" />
+    <param name="target_height" value="350" />
 
     <!-- <param name="bbox_start_y" value="100" /> -->
     <!-- <param name="bbox_start_x" value="120" /> -->
