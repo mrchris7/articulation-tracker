@@ -1,0 +1,140 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Shared arguments -->
+  <arg name="use_simulated_camera" default="true" />
+  <arg name="data_root" default="/rosbags/data/scene0010_00" />
+  <arg name="zed_type" default="zed2i" />
+  <arg name="detector_yaml_1" default="" />
+  <arg name="detector_yaml_2" default="" />
+
+  <!-- Per-instance arguments -->
+  <arg name="body_metafile_1" default="$(find articulation_tracker)/meta_files/handle.yaml" />
+  <arg name="body_metafile_2" default="$(find articulation_tracker)/meta_files/handle.yaml" />
+  <arg name="temp_directory_1" default="$(find articulation_tracker)/../temp_icg/tracker1" />
+  <arg name="temp_directory_2" default="$(find articulation_tracker)/../temp_icg/tracker2" />
+  <arg name="body_name_1" default="body_1" />
+  <arg name="body_name_2" default="body_2" />
+  <arg name="render_model_1" default="true" />
+  <arg name="render_model_2" default="true" />
+
+  <!-- ZED Simulator Node (single source, shared by both tracker instances) -->
+  <group if="$(arg use_simulated_camera)">
+    <node
+      name="zed_simulator_node"
+      pkg="articulation_tracker"
+      type="zed_simulator_node_sys.sh"
+      output="screen">
+      <param name="zed_type" value="$(arg zed_type)" />
+      <param name="data_root" value="$(arg data_root)" />
+      <param name="color_subdir" value="color" />
+      <param name="depth_subdir" value="depth" />
+      <param name="fps" value="30.0" />
+    </node>
+  </group>
+
+  <!-- Tracker Pair 1 -->
+  <group ns="tracker1">
+    <node name="icg_tracker_ros_node" pkg="pose_estimation" type="icg_tracker_ros_node" output="screen">
+      <param name="body_metafile" value="$(arg body_metafile_1)" />
+      <param name="temp_directory" value="$(arg temp_directory_1)" />
+      <param name="body_name" value="$(arg body_name_1)" />
+      <remap from="/pose_estimation/poses" to="/tracker1/pose_estimation/poses" />
+      <remap from="/pose_estimation/set_initial_pose" to="/tracker1/pose_estimation/set_initial_pose" />
+    </node>
+
+    <node name="sam2_icg_tracker_ros" pkg="articulation_tracker" type="sam2_icg_tracker_conda.sh" output="screen">
+      <!-- Pair-local communication with ICG node -->
+      <remap from="/pose_estimation/poses" to="/tracker1/pose_estimation/poses" />
+      <remap from="/pose_estimation/set_initial_pose" to="/tracker1/pose_estimation/set_initial_pose" />
+
+      <!-- Pair-local monitoring topics -->
+      <remap from="/sam2_icg_tracker/current_pose" to="/tracker1/sam2_icg_tracker/current_pose" />
+      <remap from="/sam2_icg_tracker/reference_pose" to="/tracker1/sam2_icg_tracker/reference_pose" />
+      <remap from="/sam2_icg_tracker/euclidean_dist" to="/tracker1/sam2_icg_tracker/euclidean_dist" />
+      <remap from="/sam2_icg_tracker/rotation" to="/tracker1/sam2_icg_tracker/rotation" />
+
+      <!-- SAM2 parameters -->
+      <param name="checkpoint" value="$(find articulation_tracker)/../sam2_video_predictor/checkpoints/sam2_hiera_small.pt" />
+      <param name="model_cfg" value="sam2_hiera_s.yaml" />
+
+      <!-- Camera -->
+      <param name="zed_type" value="$(arg zed_type)" />
+
+      <!-- Point cloud parameters -->
+      <param name="voxel_size" value="0.005" />
+
+      <!-- CAD model parameters -->
+      <param name="cad_model_path" value="$(find articulation_tracker)/meta_files/handle.obj" />
+      <param name="cad_scale" value="0.001" />
+
+      <!-- Other parameters -->
+      <param name="render_model" value="$(arg render_model_1)" />
+      <param name="save_frames" value="false" />
+      <param name="output_dir" value="$(find articulation_tracker)/output/tracker1" />
+
+      <!-- Progress tracking (optional) -->
+      <param name="progress_mode" value="distance" />
+      <param name="goal_distance" value="0.2" />
+      <param name="progress_axis" value="auto" />
+
+      <param name="target_width" value="550" />
+      <param name="target_height" value="400" />
+
+      <!-- Optional predefined detector pose -->
+      <param name="detector_yaml" value="$(arg detector_yaml_1)" />
+    </node>
+  </group>
+
+  <!-- Tracker Pair 2 -->
+  <group ns="tracker2">
+    <node name="icg_tracker_ros_node" pkg="pose_estimation" type="icg_tracker_ros_node" output="screen">
+      <param name="body_metafile" value="$(arg body_metafile_2)" />
+      <param name="temp_directory" value="$(arg temp_directory_2)" />
+      <param name="body_name" value="$(arg body_name_2)" />
+      <remap from="/pose_estimation/poses" to="/tracker2/pose_estimation/poses" />
+      <remap from="/pose_estimation/set_initial_pose" to="/tracker2/pose_estimation/set_initial_pose" />
+    </node>
+
+    <node name="sam2_icg_tracker_ros" pkg="articulation_tracker" type="sam2_icg_tracker_conda.sh" output="screen">
+      <!-- Pair-local communication with ICG node -->
+      <remap from="/pose_estimation/poses" to="/tracker2/pose_estimation/poses" />
+      <remap from="/pose_estimation/set_initial_pose" to="/tracker2/pose_estimation/set_initial_pose" />
+
+      <!-- Pair-local monitoring topics -->
+      <remap from="/sam2_icg_tracker/current_pose" to="/tracker2/sam2_icg_tracker/current_pose" />
+      <remap from="/sam2_icg_tracker/reference_pose" to="/tracker2/sam2_icg_tracker/reference_pose" />
+      <remap from="/sam2_icg_tracker/euclidean_dist" to="/tracker2/sam2_icg_tracker/euclidean_dist" />
+      <remap from="/sam2_icg_tracker/rotation" to="/tracker2/sam2_icg_tracker/rotation" />
+
+      <!-- SAM2 parameters -->
+      <param name="checkpoint" value="$(find articulation_tracker)/../sam2_video_predictor/checkpoints/sam2_hiera_small.pt" />
+      <param name="model_cfg" value="sam2_hiera_s.yaml" />
+
+      <!-- Camera -->
+      <param name="zed_type" value="$(arg zed_type)" />
+
+      <!-- Point cloud parameters -->
+      <param name="voxel_size" value="0.005" />
+
+      <!-- CAD model parameters -->
+      <param name="cad_model_path" value="$(find articulation_tracker)/meta_files/handle.obj" />
+      <param name="cad_scale" value="0.001" />
+
+      <!-- Other parameters -->
+      <param name="render_model" value="$(arg render_model_2)" />
+      <param name="save_frames" value="false" />
+      <param name="output_dir" value="$(find articulation_tracker)/output/tracker2" />
+
+      <!-- Progress tracking (optional) -->
+      <param name="progress_mode" value="distance" />
+      <param name="goal_distance" value="0.2" />
+      <param name="progress_axis" value="auto" />
+
+      <param name="target_width" value="550" />
+      <param name="target_height" value="400" />
+
+      <!-- Optional predefined detector pose -->
+      <param name="detector_yaml" value="$(arg detector_yaml_2)" />
+    </node>
+  </group>
+</launch>
