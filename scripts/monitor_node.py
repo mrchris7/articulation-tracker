@@ -95,7 +95,7 @@ class PoseMonitorNode:
     
     def rotation_callback(self, msg):
         """Callback for rotation updates."""
-        rospy.loginfo(f"\nRotation: {msg.data:.2f} degrees")
+        rospy.loginfo(f"\nRotation: {msg.data:.2f} radians")
         
     def debug_callback(self, msg):
         """Callback for debug updates."""

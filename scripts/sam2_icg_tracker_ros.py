@@ -670,7 +670,7 @@ class SAM2ICGTrackerROS:
             current_axis = self.progress_axis.lower()
         
         if self.progress_mode == 'rotation':
-            angle_deg = self._estimate_angle(current_axis)
+            angle_rad, angle_deg = self._estimate_angle(current_axis)
             
             if self.goal_rotation == 0:
                 return 0.0
@@ -720,7 +720,7 @@ class SAM2ICGTrackerROS:
                 angle_rad_signed = np.arctan2(R_relative[2, 1], R_relative[2, 2])
         
         angle_deg = np.degrees(angle_rad_signed)
-        return angle_deg
+        return angle_rad_signed, angle_deg
 
     def _estimate_translation_distance(self, current_axis):
         t_initial = self.reference_pose[:3, 3]

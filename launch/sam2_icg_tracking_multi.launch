@@ -74,11 +74,11 @@
 
       <!-- Progress tracking (optional) -->
       <param name="progress_mode" value="distance" />
-      <param name="goal_distance" value="0.2" />
+      <param name="goal_distance" value="0.3" />
       <param name="progress_axis" value="auto" />
 
-      <param name="target_width" value="550" />
-      <param name="target_height" value="400" />
+      <param name="target_width" value="800" />  <!-- full resolution width 1104 -->
+      <param name="target_height" value="600" />  <!-- full resolution height 621 -->
 
       <!-- Optional predefined detector pose -->
       <param name="detector_yaml" value="$(arg detector_yaml_1)" />
@@ -127,11 +127,11 @@
 
       <!-- Progress tracking (optional) -->
       <param name="progress_mode" value="distance" />
-      <param name="goal_distance" value="0.2" />
+      <param name="goal_distance" value="0.3" />
       <param name="progress_axis" value="auto" />
 
-      <param name="target_width" value="550" />
-      <param name="target_height" value="400" />
+      <param name="target_width" value="800" />  <!-- full resolution width 1104 -->
+      <param name="target_height" value="600" />  <!-- full resolution height 621 -->
 
       <!-- Optional predefined detector pose -->
       <param name="detector_yaml" value="$(arg detector_yaml_2)" />
